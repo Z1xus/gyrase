@@ -8,9 +8,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+flate2.workspace = true
+gyrase-genome.workspace = true
 gyrase-io.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
+ureq.workspace = true
 
 [lints]
 workspace = true

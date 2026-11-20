@@ -22,6 +22,7 @@ md-5 = "0.11.0"
 rayon = "1.12.0"
 sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 thiserror = "2.0.21"
+ureq = { version = "3.5.2", default-features = false, features = ["rustls"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

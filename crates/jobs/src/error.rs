@@ -16,6 +16,14 @@ pub enum Error {
 	Unpaired(PathBuf),
 	#[error("system information: {0}")]
 	System(#[from] sysinfo::Error),
+	#[error("no data folder")]
+	NoDataDir,
+	#[error("download failed: {0}")]
+	Download(#[from] Box<ureq::Error>),
+	#[error("downloaded {} does not match its build", .0.name())]
+	Mismatch(gyrase_genome::Build),
+	#[error(transparent)]
+	Genome(#[from] gyrase_genome::Error),
 	#[error("cancelled")]
 	Cancelled,
 }
