@@ -43,14 +43,30 @@ impl Decoded {
 	}
 }
 
-pub fn decode(source: Box<dyn Read + Send>, workers: &Workers) -> Result<Decoded, Error> {
-	let mut buffered = BufReader::with_capacity(1 << 20, source);
-	let head = buffered.fill_buf()?;
-	let compression = match head {
+fn compression_of(head: &[u8]) -> Compression {
+	match head {
 		[0x1f, 0x8b, ..] if head.len() >= PEEK_LEN && is_bgzf(head) => Compression::Bgzf,
 		[0x1f, 0x8b, ..] => Compression::Gzip,
 		_ => Compression::None,
+	}
+}
+
+pub fn peek(source: impl Read, limit: u64) -> Result<(Compression, Vec<u8>), Error> {
+	let mut buffered = BufReader::new(source);
+	let compression = compression_of(buffered.fill_buf()?);
+	let mut head = Vec::new();
+	match compression {
+		Compression::None => buffered.take(limit).read_to_end(&mut head)?,
+		Compression::Gzip | Compression::Bgzf => MultiGzDecoder::new(buffered)
+			.take(limit)
+			.read_to_end(&mut head)?,
 	};
+	Ok((compression, head))
+}
+
+pub fn decode(source: Box<dyn Read + Send>, workers: &Workers) -> Result<Decoded, Error> {
+	let mut buffered = BufReader::with_capacity(1 << 20, source);
+	let compression = compression_of(buffered.fill_buf()?);
 	Ok(match compression {
 		Compression::None => Decoded::Plain(buffered),
 		Compression::Gzip => Decoded::Gzip(Box::new(BufReader::with_capacity(

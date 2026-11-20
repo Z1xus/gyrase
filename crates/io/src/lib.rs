@@ -8,5 +8,5 @@ pub use bgzf::{
 	MAX_BLOCK_LEN, VirtualOffset,
 };
 pub use error::Error;
-pub use format::{Compression, Decoded, decode};
+pub use format::{Compression, Decoded, decode, peek};
 pub use workers::Workers;
