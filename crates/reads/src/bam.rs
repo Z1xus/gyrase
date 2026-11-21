@@ -7,8 +7,7 @@ mod reader;
 mod writer;
 
 pub use batch::{Located, RecordBatch};
-pub(crate) use index::fits_bai;
-pub use index::{csi_geometry, index_bam};
+pub use index::{csi_geometry, index_bam, index_layout};
 pub(crate) use indexed::IndexedWriter;
 pub use query::Query;
 pub use reader::BamReader;

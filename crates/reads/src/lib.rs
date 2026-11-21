@@ -12,6 +12,7 @@ mod stats;
 
 pub use bam::{
 	BamReader, BamWriter, Located, Query, RecordBatch, Written, csi_geometry, index_bam,
+	index_layout,
 };
 pub use error::{
 	BamError, Error, FastqError, HeaderError, MarkError, RecordError, SamError, SamField,

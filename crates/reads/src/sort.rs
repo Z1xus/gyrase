@@ -5,18 +5,16 @@ mod run;
 use std::io::Write;
 use std::path::PathBuf;
 
-use gyrase_index::{Format, Geometry, Index};
+use gyrase_index::{Format, Index};
 use gyrase_io::{Level, Workers};
 
 use self::buffer::Buffer;
 use self::run::RunFile;
-use crate::bam::{IndexedWriter, csi_geometry, fits_bai};
+use crate::bam::{IndexedWriter, index_layout};
 use crate::error::{Error, SortError};
 use crate::header::{Header, SortOrder};
 use crate::markdup::{MarkSettings, MarkStats, Marker};
 use crate::record::RecordRef;
-
-const CSI_MIN_SHIFT: u32 = 14;
 
 #[derive(Debug)]
 pub struct Sorter<'w> {
@@ -90,11 +88,7 @@ impl<'w> Sorter<'w> {
 		mut marker: Option<Marker>,
 	) -> Result<(Sorted<W>, Option<MarkStats>), Error> {
 		self.buffer.sort(self.workers);
-		let (format, geometry) = if fits_bai(&self.header) {
-			(Format::Bai, Geometry::BAI)
-		} else {
-			(Format::Csi, csi_geometry(&self.header, CSI_MIN_SHIFT)?)
-		};
+		let (format, geometry) = index_layout(&self.header)?;
 		let mut writer = IndexedWriter::new(output, &self.header, geometry, level, self.workers)?;
 		let mut emit = |bytes: &[u8]| writer.write(RecordRef::new(bytes)?);
 		merge::merge(
