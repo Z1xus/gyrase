@@ -16,6 +16,9 @@ build = "build.rs"
 name = "gyrase"
 path = "src/main.rs"
 
+[features]
+gpu = ["gyrase-jobs/gpu"]
+
 [dependencies]
 gyrase-extract.workspace = true
 gyrase-jobs.workspace = true

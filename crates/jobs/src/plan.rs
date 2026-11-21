@@ -373,6 +373,7 @@ impl Plan {
 		Alignment {
 			index: &index,
 			compute: &pools.compute,
+			gpu: resources.gpu,
 			io: &pools.io,
 			cancel,
 		}

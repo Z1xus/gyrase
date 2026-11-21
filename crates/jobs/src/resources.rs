@@ -9,6 +9,7 @@ use crate::Error;
 pub struct Resources {
 	pub threads: NonZeroUsize,
 	pub memory: u64,
+	pub gpu: bool,
 }
 
 impl Resources {
@@ -23,6 +24,7 @@ impl Resources {
 		Ok(Self {
 			threads: thread::available_parallelism().unwrap_or(NonZeroUsize::MIN),
 			memory,
+			gpu: true,
 		})
 	}
 }

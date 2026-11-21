@@ -40,6 +40,7 @@ enum Views<'a> {
 pub(crate) struct Alignment<'a> {
 	pub index: &'a Index,
 	pub compute: &'a Workers,
+	pub gpu: bool,
 	pub io: &'a Workers,
 	pub cancel: &'a Cancel,
 }
@@ -118,7 +119,14 @@ impl Alignment<'_> {
 		read: &Arc<AtomicU64>,
 		mut advance: impl FnMut(u64),
 	) -> Result<(), Error> {
-		let aligner = Aligner::new(self.index, AlignConfig::default(), self.compute);
+		let aligner = Aligner::new(
+			self.index,
+			AlignConfig {
+				gpu: self.gpu,
+				..AlignConfig::default()
+			},
+			self.compute,
+		);
 		thread::scope(|scope| {
 			let (chunk_sender, chunks) = mpsc::sync_channel(QUEUE);
 			let (encoded_sender, encoded) = mpsc::sync_channel::<Vec<Encoded>>(ENCODED_QUEUE);

@@ -21,6 +21,7 @@ Options:
   -o, --output DIR     write files to DIR [next to the input]
   -f, --formats LIST   23andme,ancestry,ftdna,myheritage,livingdna or none [all]
   -b, --bam            also write a BAM file from FASTQ input
+      --no-gpu         do not use the graphics card
   -h, --help           show this help
 ";
 
@@ -48,12 +49,14 @@ fn run(args: Vec<OsString>) -> Result<(), Failure> {
 	let mut output = None;
 	let mut formats = Format::ALL.to_vec();
 	let mut bam = false;
+	let mut gpu = true;
 	let mut paths = Vec::new();
 	while let Some(arg) = parser.next()? {
 		match arg {
 			Short('o') | Long("output") => output = Some(PathBuf::from(parser.value()?)),
 			Short('f') | Long("formats") => formats = parse_formats(&parser.value()?.string()?)?,
 			Short('b') | Long("bam") => bam = true,
+			Long("no-gpu") => gpu = false,
 			Short('h') | Long("help") => return Err(Failure::Help),
 			Value(value) => paths.push(PathBuf::from(value)),
 			_ => return Err(arg.unexpected().into()),
@@ -67,7 +70,10 @@ fn run(args: Vec<OsString>) -> Result<(), Failure> {
 		.map(|path| Input::open(path))
 		.collect::<Result<Vec<_>, _>>()?;
 	let store = Store::locate()?;
-	let resources = Resources::detect()?;
+	let resources = Resources {
+		gpu,
+		..Resources::detect()?
+	};
 	let cancel = Cancel::default();
 	let handler = cancel.clone();
 	ctrlc::set_handler(move || handler.cancel())

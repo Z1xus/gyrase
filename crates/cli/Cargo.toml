@@ -15,6 +15,9 @@ categories = ["command-line-utilities", "science::bioinformatics::genomics"]
 name = "gyr"
 path = "src/main.rs"
 
+[features]
+gpu = ["gyrase-jobs/gpu"]
+
 [dependencies]
 gyrase-extract.workspace = true
 gyrase-genome.workspace = true

@@ -11,6 +11,9 @@ readme = "README.md"
 keywords = ["genomics", "bioinformatics", "pipeline", "vcf", "bam"]
 categories = ["science::bioinformatics::genomics"]
 
+[features]
+gpu = ["synapton/gpu"]
+
 [dependencies]
 gyrase-call.workspace = true
 gyrase-extract.workspace = true
