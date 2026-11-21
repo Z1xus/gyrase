@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Cursor, Read};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -18,6 +18,7 @@ const BAM_MAGIC: &[u8] = b"BAM\x01";
 const CRAM_MAGIC: &[u8] = b"CRAM";
 const MAGIC_LENGTH: u64 = 4;
 const BUFFER: usize = 1 << 20;
+pub(super) const HEAD_LENGTH: u64 = 1 << 16;
 
 enum Source {
 	Sam(SamReader<Box<dyn BufRead>>),
@@ -87,8 +88,14 @@ impl Input {
 		need: Need,
 		workers: &Workers,
 	) -> Result<Self, Failure> {
-		let mut buffered = BufReader::with_capacity(BUFFER, open(path)?);
-		match kind(buffered.fill_buf()?)? {
+		let mut raw = open(path)?;
+		let mut head = Vec::new();
+		Read::by_ref(&mut raw)
+			.take(HEAD_LENGTH)
+			.read_to_end(&mut head)?;
+		let kind = kind(head.as_slice())?;
+		let buffered = BufReader::with_capacity(BUFFER, Cursor::new(head).chain(raw));
+		match kind {
 			Kind::Bam => {
 				let reader = BamReader::open(Box::new(buffered), workers)?;
 				Ok(Self {

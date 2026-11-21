@@ -7,7 +7,7 @@ use gyrase_reads::{BamReader, SamReader};
 use lexopt::Parser;
 use lexopt::prelude::*;
 
-use super::input::{Kind, kind};
+use super::input::{HEAD_LENGTH, Kind, kind};
 use crate::failure::Failure;
 use crate::shared::workers;
 
@@ -20,7 +20,6 @@ Options:
   -u  unmapped input, do not require references in the header
 ";
 
-const HEAD_LENGTH: u64 = 1 << 16;
 const BGZF_EOF: [u8; 28] = [
 	0x1f, 0x8b, 0x08, 0x04, 0, 0, 0, 0, 0, 0xff, 0x06, 0, 0x42, 0x43, 0x02, 0, 0x1b, 0, 0x03, 0, 0,
 	0, 0, 0, 0, 0, 0, 0,
@@ -51,7 +50,10 @@ fn problem(path: &str, unmapped: bool, workers: &Workers) -> Result<Option<&'sta
 		return Ok(Some("was missing EOF block when one should be present."));
 	}
 	file.rewind()?;
-	let references = match kind(head.as_slice())? {
+	let Ok(kind) = kind(head.as_slice()) else {
+		return Ok(Some("was not identified as sequence data."));
+	};
+	let references = match kind {
 		Kind::Bam => {
 			let Ok(header) = BamReader::read_header(&file, workers) else {
 				return Ok(Some("could not read the header."));
@@ -69,7 +71,9 @@ fn problem(path: &str, unmapped: bool, workers: &Workers) -> Result<Option<&'sta
 			reader.header().references().len()
 		}
 		Kind::Sam => {
-			let text = decode(Box::new(file), workers)?;
+			let Ok(text) = decode(Box::new(file), workers) else {
+				return Ok(Some("could not read the header."));
+			};
 			let Ok(reader) = SamReader::new(Box::new(text) as Box<dyn BufRead>) else {
 				return Ok(Some("could not read the header."));
 			};

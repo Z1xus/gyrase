@@ -34,6 +34,14 @@ Options:
   -@, --threads INT       number of additional threads
 ";
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Content {
+	Records,
+	WithHeader,
+	HeaderOnly,
+	Count,
+}
+
 #[derive(Default)]
 struct Filter {
 	min_mapq: u8,
@@ -107,9 +115,7 @@ fn tally(input: Input, filter: &Filter, mut sink: Sink, target: &Target) -> Resu
 pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut format = None;
 	let mut level = None;
-	let mut with_header = false;
-	let mut header_only = false;
-	let mut count = false;
+	let mut content = Content::Records;
 	let mut multi = false;
 	let mut output = None;
 	let mut threads = None;
@@ -133,9 +139,9 @@ pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 				level = Some(Level::STORED);
 			}
 			Short('1') | Long("fast") => level = Some(Level::FASTEST),
-			Short('h') | Long("with-header") => with_header = true,
-			Short('H') | Long("header-only") => header_only = true,
-			Short('c') | Long("count") => count = true,
+			Short('h') | Long("with-header") => content = content.max(Content::WithHeader),
+			Short('H') | Long("header-only") => content = content.max(Content::HeaderOnly),
+			Short('c') | Long("count") => content = Content::Count,
 			Short('M') | Long("multi-region") => multi = true,
 			Short('o') | Long("output") => output = Some(parser.value()?.string()?),
 			Short('@') | Long("threads") => threads = Some(parser.value()?.parse()?),
@@ -183,19 +189,19 @@ pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 		filter.targets = Some(load_targets(targets, &input.header)?);
 	}
 	let sink = target.open()?;
-	if count {
+	if content == Content::Count {
 		return tally(input, &filter, sink, &target);
 	}
 	let mut writer = Output::new(
 		sink,
 		format,
 		&input.header,
-		with_header || header_only,
+		content != Content::Records,
 		level.unwrap_or(Level::DEFAULT),
 		reference.as_ref(),
 		&workers,
 	)?;
-	if !header_only {
+	if content != Content::HeaderOnly {
 		input.each(|record| {
 			if filter.accepts(record) {
 				writer.write(record)?;
