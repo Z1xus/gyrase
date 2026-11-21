@@ -58,6 +58,8 @@ pub enum Error {
 	UnsupportedVersion { major: u8, minor: u8 },
 	#[error("checksum of the {0} does not match")]
 	ChecksumMismatch(&'static str),
+	#[error("file is not sorted by reference and position")]
+	NotSorted,
 	#[error("malformed {0}")]
 	Malformed(&'static str),
 	#[error("{0} cannot be written to CRAM")]

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 
 use libdeflater::Crc;
 
@@ -42,6 +42,7 @@ pub(crate) struct ContainerHeader {
 	pub(crate) records: u32,
 	pub(crate) landmarks: Vec<u32>,
 	pub(crate) length: usize,
+	pub(crate) size: usize,
 }
 
 impl ContainerHeader {
@@ -72,6 +73,34 @@ impl ContainerHeader {
 						return Err(Error::Truncated);
 					}
 					return Ok(Some((header, body)));
+				}
+				Err(Error::Truncated) => {
+					let before = head.len();
+					head.resize(before + HEADER_PROBE, 0);
+					let got = read_up_to(reader, head.get_mut(before..).ok_or(Error::Truncated)?)?;
+					if got == 0 {
+						return Err(Error::Truncated);
+					}
+					head.truncate(before + got);
+				}
+				Err(error) => return Err(error),
+			}
+		}
+	}
+
+	pub(crate) fn read_head<R: Read + Seek>(reader: &mut R) -> Result<Option<Self>, Error> {
+		let start = reader.stream_position()?;
+		let mut head = vec![0; HEADER_PROBE];
+		let got = read_up_to(reader, &mut head)?;
+		if got == 0 {
+			return Ok(None);
+		}
+		head.truncate(got);
+		loop {
+			match Self::parse(&head) {
+				Ok((header, consumed)) => {
+					reader.seek(SeekFrom::Start(start + consumed as u64))?;
+					return Ok(Some(header));
 				}
 				Err(Error::Truncated) => {
 					let before = head.len();
@@ -120,6 +149,7 @@ impl ContainerHeader {
 				records,
 				landmarks,
 				length,
+				size: cursor.position(),
 			},
 			cursor.position(),
 		))

@@ -37,6 +37,14 @@ pub(crate) struct Environment {
 
 impl Environment {
 	pub(crate) fn new(header: &Header, reference: Option<Arc<Reference>>, prefix: &str) -> Self {
+		Self::with_references(header, References::new(header, reference), prefix)
+	}
+
+	pub(crate) fn unbacked(header: &Header) -> Self {
+		Self::with_references(header, References::unbacked(header), "")
+	}
+
+	fn with_references(header: &Header, references: References, prefix: &str) -> Self {
 		let read_groups: Vec<Vec<u8>> = header
 			.lines()
 			.iter()
@@ -53,7 +61,7 @@ impl Environment {
 				.is_some_and(|name| name == b"UNKNOWN")
 		});
 		Self {
-			references: References::new(header, reference),
+			references,
 			read_groups,
 			unknown_read_group,
 			prefix: prefix.as_bytes().to_vec(),
@@ -166,6 +174,28 @@ pub(crate) fn decode_slice(
 	header: &CompressionHeader,
 	blocks: &SliceBlocks<'_>,
 ) -> Result<Decoded, Error> {
+	let records = decode_records(environment, header, blocks)?;
+	emit::finish(records, environment, blocks.header.record_counter)
+}
+
+pub(crate) fn decode_extents(
+	environment: &Environment,
+	header: &CompressionHeader,
+	blocks: &SliceBlocks<'_>,
+) -> Result<Vec<(i32, i32, i32)>, Error> {
+	let records = decode_records(environment, header, blocks)?;
+	Ok(records
+		.recs
+		.iter()
+		.map(|rec| (rec.reference, rec.position, rec.end))
+		.collect())
+}
+
+fn decode_records(
+	environment: &Environment,
+	header: &CompressionHeader,
+	blocks: &SliceBlocks<'_>,
+) -> Result<Records, Error> {
 	let slice = &blocks.header;
 	let records = usize::try_from(slice.records)
 		.ok()
@@ -194,7 +224,7 @@ pub(crate) fn decode_slice(
 	for _ in 0..records {
 		decoder.record()?;
 	}
-	emit::finish(decoder.out, environment, slice.record_counter)
+	Ok(decoder.out)
 }
 
 struct Decoder<'a> {

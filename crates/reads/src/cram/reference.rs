@@ -16,9 +16,17 @@ struct Entry {
 pub(crate) struct References {
 	reference: Option<Arc<Reference>>,
 	entries: Vec<Entry>,
+	unbacked: bool,
 }
 
 impl References {
+	pub(crate) fn unbacked(header: &Header) -> Self {
+		Self {
+			unbacked: true,
+			..Self::new(header, None)
+		}
+	}
+
 	pub(crate) fn new(header: &Header, reference: Option<Arc<Reference>>) -> Self {
 		let entries = header
 			.references()
@@ -31,7 +39,11 @@ impl References {
 					.and_then(|source| source.contigs().resolve(entry.name())),
 			})
 			.collect();
-		Self { reference, entries }
+		Self {
+			reference,
+			entries,
+			unbacked: false,
+		}
 	}
 
 	pub(crate) fn count(&self) -> usize {
@@ -66,6 +78,9 @@ impl References {
 	}
 
 	pub(crate) fn window(&self, index: usize, start: u64, end: u64) -> Result<Window, Error> {
+		if self.unbacked {
+			return Ok(Window::default());
+		}
 		let (interval, source) = self.interval(index, start, end)?;
 		let mut bases = Vec::new();
 		source.fetch(&interval, &mut bases)?;

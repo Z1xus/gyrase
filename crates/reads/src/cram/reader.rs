@@ -51,7 +51,7 @@ impl CramBatch {
 			.record(index - before)
 	}
 
-	pub fn iter(&self) -> impl Iterator<Item = Result<RecordRef<'_>, RecordError>> + Clone {
+	pub fn iter(&self) -> impl Iterator<Item = Result<RecordRef<'_>, RecordError>> {
 		(0..self.len()).map(|index| self.at(index))
 	}
 
@@ -241,7 +241,11 @@ impl CramReader {
 fn read_header(source: &mut impl Read) -> Result<Header, Error> {
 	Version::read(source)?;
 	let (_, body) = ContainerHeader::read(source)?.ok_or(Error::Truncated)?;
-	let block = Block::read(&mut Cursor::new(&body))?;
+	parse_header(&body)
+}
+
+pub(crate) fn parse_header(body: &[u8]) -> Result<Header, Error> {
+	let block = Block::read(&mut Cursor::new(body))?;
 	if block.kind != BlockKind::FileHeader {
 		return Err(Error::Malformed("file header"));
 	}

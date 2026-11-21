@@ -5,6 +5,7 @@ mod decode;
 mod emit;
 mod encoding;
 mod error;
+mod index;
 mod reader;
 mod records;
 mod reference;
@@ -14,5 +15,6 @@ mod structure;
 mod write;
 
 pub use error::{Codec, Error};
+pub use index::index_cram;
 pub use reader::{CramBatch, CramReader};
 pub use write::{CramWriter, Finished};

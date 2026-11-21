@@ -26,7 +26,7 @@ pub(crate) struct SliceHeader {
 }
 
 impl SliceHeader {
-	fn read(bytes: &[u8]) -> Result<Self, Error> {
+	pub(crate) fn read(bytes: &[u8]) -> Result<Self, Error> {
 		let mut cursor = Cursor::new(bytes);
 		let reference = cursor.itf8()?;
 		let start = cursor.itf8()?;
