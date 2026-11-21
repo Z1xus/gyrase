@@ -1,0 +1,18 @@
+[package]
+name = "synapton"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+gyrase-genome.workspace = true
+gyrase-io.workspace = true
+multiversion.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

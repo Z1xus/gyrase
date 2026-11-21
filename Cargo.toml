@@ -19,6 +19,7 @@ gyrase-jobs = { path = "crates/jobs" }
 gyrase-pileup = { path = "crates/pileup" }
 gyrase-reads = { path = "crates/reads" }
 gyrase-variants = { path = "crates/variants" }
+synapton = { path = "crates/synapton" }
 bzip2 = "0.6.1"
 crossbeam-channel = "0.5.17"
 flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] }
@@ -26,6 +27,7 @@ libdeflater = "1.26.1"
 lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 md-5 = "0.11.0"
 memchr = "2.8.3"
+multiversion = "0.9.2"
 rayon = "1.12.0"
 sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 thiserror = "2.0.21"
