@@ -15,9 +15,12 @@ gyrase-genome = { path = "crates/genome" }
 gyrase-index = { path = "crates/index" }
 gyrase-io = { path = "crates/io" }
 gyrase-jobs = { path = "crates/jobs" }
+gyrase-reads = { path = "crates/reads" }
+bzip2 = "0.6.1"
 crossbeam-channel = "0.5.17"
 flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] }
 libdeflater = "1.26.1"
+lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 md-5 = "0.11.0"
 memchr = "2.8.3"
 rayon = "1.12.0"

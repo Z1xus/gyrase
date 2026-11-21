@@ -1,0 +1,22 @@
+[package]
+name = "gyrase-reads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bzip2.workspace = true
+gyrase-genome.workspace = true
+gyrase-index.workspace = true
+gyrase-io.workspace = true
+libdeflater.workspace = true
+lzma-rust2.workspace = true
+memchr.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
