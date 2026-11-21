@@ -371,13 +371,13 @@ impl Plan {
 		let resident = u64::try_from(index.heap_bytes()).unwrap_or(u64::MAX);
 		let memory = resources.memory.saturating_sub(resident);
 		Alignment {
-			index: &index,
 			compute: &pools.compute,
 			gpu: resources.gpu,
 			io: &pools.io,
 			cancel,
 		}
 		.run(
+			index,
 			lanes,
 			&self.sample.name,
 			path,

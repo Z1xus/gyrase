@@ -38,7 +38,6 @@ enum Views<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Alignment<'a> {
-	pub index: &'a Index,
 	pub compute: &'a Workers,
 	pub gpu: bool,
 	pub io: &'a Workers,
@@ -71,8 +70,10 @@ pub(crate) fn index(
 }
 
 impl Alignment<'_> {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn run(
 		self,
+		index: Index,
 		lanes: &[Lane],
 		sample: &str,
 		output: &Path,
@@ -81,7 +82,7 @@ impl Alignment<'_> {
 		report: &mut impl FnMut(Progress),
 	) -> Result<(Header, Output), Error> {
 		let mut header =
-			Header::from_contigs(self.index.contigs()).map_err(gyrase_reads::Error::from)?;
+			Header::from_contigs(index.contigs()).map_err(gyrase_reads::Error::from)?;
 		header.push_read_group(Fields::new().with(*b"ID", sample).with(*b"SM", sample));
 		let total = lanes.iter().flat_map(inputs).map(|input| input.size).sum();
 		let read = Arc::new(AtomicU64::new(0));
@@ -100,9 +101,10 @@ impl Alignment<'_> {
 			self.compute,
 			self.cancel,
 			|sorter| {
-				self.align(lanes, sample, sorter, &read, |done| {
+				self.align(&index, lanes, sample, sorter, &read, |done| {
 					report(estimate.advance(done, Instant::now()));
 				})?;
+				drop(index);
 				report(Estimate::new(Stage::Sort, 1, Instant::now()).progress());
 				Ok(())
 			},
@@ -113,6 +115,7 @@ impl Alignment<'_> {
 
 	fn align(
 		self,
+		index: &Index,
 		lanes: &[Lane],
 		sample: &str,
 		sorter: &mut Sorter<'_>,
@@ -120,7 +123,7 @@ impl Alignment<'_> {
 		mut advance: impl FnMut(u64),
 	) -> Result<(), Error> {
 		let aligner = Aligner::new(
-			self.index,
+			index,
 			AlignConfig {
 				gpu: self.gpu,
 				..AlignConfig::default()
@@ -143,7 +146,7 @@ impl Alignment<'_> {
 			for chunk in chunks {
 				self.cancel.check()?;
 				let parts = align_chunk(&aligner, &mut sizes, &chunk.views(), || {
-					BamEmitter::new(self.index.contigs(), Some(sample.as_bytes()))
+					BamEmitter::new(index.contigs(), Some(sample.as_bytes()))
 				})?;
 				if encoded_sender.send(parts).is_err() {
 					break;
