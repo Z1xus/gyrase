@@ -147,6 +147,19 @@ impl ConcatInput<'_> {
 				.formatter
 				.push_bcf(source.shared(), source.indiv(), span, &mut out.encoded);
 		}
+		if self.verbatim(Format::Vcf) {
+			let span = Span {
+				contig: source.contig()?,
+				start: source.start()?,
+				end: source.end(&self.concat.header)?,
+			};
+			return out.formatter.push_bcf_as_vcf(
+				&self.concat.header,
+				source,
+				span,
+				&mut out.encoded,
+			);
+		}
 		out.record.read_bcf(source)?;
 		self.remap.apply(&mut out.record)?;
 		out.formatter

@@ -112,6 +112,11 @@ impl View {
 			(Some(indices), Counts::Keep) => (input.with_samples(indices)?, None),
 			(None, _) => (input.clone(), None),
 		};
+		let header = if header.sample_count() == 0 {
+			header.without_formats()
+		} else {
+			header
+		};
 		let condition = match &options.condition {
 			None => None,
 			Some(Condition::Include(text)) => {
@@ -173,11 +178,17 @@ impl View {
 	}
 
 	fn finish_record(&self, out: &mut ViewOutput) -> Result<(), Error> {
-		if let Some(keep) = &self.keep {
+		let all_dropped = self.keep.as_ref().is_some_and(Vec::is_empty);
+		if let Some(keep) = &self.keep
+			&& !all_dropped
+		{
 			out.record.keep_samples(keep)?;
 		}
 		if let Some(keys) = self.counts {
 			out.record.update_counts(keys, &mut out.count_scratch)?;
+		}
+		if all_dropped {
+			out.record.keep_samples(&[])?;
 		}
 		out.formatter
 			.push_record(&self.header, &out.record, &mut out.encoded)
@@ -213,6 +224,16 @@ impl View {
 			return out
 				.formatter
 				.push_bcf(source.shared(), source.indiv(), span, &mut out.encoded);
+		}
+		if self.verbatim() && self.format == Format::Vcf {
+			let span = Span {
+				contig: source.contig()?,
+				start: source.start()?,
+				end: source.end(&self.input_header)?,
+			};
+			return out
+				.formatter
+				.push_bcf_as_vcf(&self.header, source, span, &mut out.encoded);
 		}
 		out.record.read_bcf(source)?;
 		self.finish_record(out)

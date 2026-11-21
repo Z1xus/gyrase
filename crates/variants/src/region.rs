@@ -10,9 +10,17 @@ struct Span {
 #[derive(Debug, Clone, Default)]
 pub struct Regions {
 	spans: Vec<Span>,
+	positions: bool,
 }
 
 impl Regions {
+	pub fn positions(intervals: &[Interval]) -> Self {
+		Self {
+			positions: true,
+			..Self::new(intervals)
+		}
+	}
+
 	pub fn new(intervals: &[Interval]) -> Self {
 		let mut spans: Vec<Span> = intervals
 			.iter()
@@ -33,16 +41,24 @@ impl Regions {
 				_ => merged.push(span),
 			}
 		}
-		Self { spans: merged }
+		Self {
+			spans: merged,
+			positions: false,
+		}
 	}
 
 	pub fn overlaps(&self, contig: u32, start: u32, end: u32) -> bool {
 		let start = u64::from(start);
+		let end = if self.positions {
+			start + 1
+		} else {
+			u64::from(end)
+		};
 		let first = self
 			.spans
 			.partition_point(|span| (span.contig, span.end) <= (contig, start));
 		self.spans
 			.get(first)
-			.is_some_and(|span| span.contig == contig && span.start < u64::from(end).max(start + 1))
+			.is_some_and(|span| span.contig == contig && span.start < end.max(start + 1))
 	}
 }

@@ -1,5 +1,5 @@
 use crate::Error;
-use crate::bcf::Encoder;
+use crate::bcf::{BcfRecord, Encoder};
 use crate::header::Header;
 use crate::record::Record;
 
@@ -103,6 +103,19 @@ impl Formatter {
 		out.bytes_mut().extend_from_slice(line);
 		out.bytes_mut().push(b'\n');
 		out.seal(span);
+	}
+
+	pub fn push_bcf_as_vcf(
+		&self,
+		header: &Header,
+		source: &BcfRecord<'_>,
+		span: Span,
+		out: &mut Encoded,
+	) -> Result<(), Error> {
+		source.write_vcf(header, out.bytes_mut())?;
+		out.bytes_mut().push(b'\n');
+		out.seal(span);
+		Ok(())
 	}
 
 	pub fn push_bcf(

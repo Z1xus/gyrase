@@ -1,6 +1,7 @@
 mod decode;
 mod encode;
 mod record;
+mod text;
 pub(crate) mod typed;
 
 pub use encode::Encoder;

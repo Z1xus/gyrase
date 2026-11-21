@@ -16,6 +16,7 @@ use crate::header::Header;
 use crate::par::ordered;
 use crate::read::{LineBatch, Reader, RecordBatch};
 use crate::record::Record;
+use crate::region::Regions;
 use crate::vcf::VcfLine;
 use crate::write::{Encoded, Format, Formatter, Placed, Sink, Span, Writer};
 
@@ -49,6 +50,7 @@ pub struct NormOptions {
 	pub duplicates: Duplicates,
 	pub window: u32,
 	pub format: Format,
+	pub regions: Option<Regions>,
 }
 
 impl Default for NormOptions {
@@ -60,6 +62,7 @@ impl Default for NormOptions {
 			duplicates: Duplicates::Keep,
 			window: DEFAULT_WINDOW,
 			format: Format::Vcf,
+			regions: None,
 		}
 	}
 }
@@ -125,6 +128,7 @@ pub struct Norm {
 	duplicates: Duplicates,
 	window: u32,
 	format: Format,
+	regions: Option<Regions>,
 	genotype: Option<u32>,
 	end_key: Option<u32>,
 	svlen_key: Option<u32>,
@@ -159,6 +163,7 @@ impl Norm {
 			duplicates: options.duplicates,
 			window: options.window,
 			format: options.format,
+			regions: options.regions,
 			genotype: header.key("GT"),
 			end_key: header.key("END"),
 			svlen_key: header.key("SVLEN"),
@@ -250,6 +255,14 @@ impl Norm {
 	}
 
 	fn process(&self, out: &mut NormOutput) -> Result<(), Error> {
+		if let Some(regions) = &self.regions
+			&& !regions.overlaps(
+				out.source.contig(),
+				out.source.start(),
+				out.source.end(&self.header),
+			) {
+			return Ok(());
+		}
 		out.stats.total += 1;
 		if !self.splits(&out.source) {
 			let kept = self.normalize(&mut out.aligner, &mut out.source, &mut out.stats)?;

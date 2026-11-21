@@ -1,7 +1,7 @@
 use std::iter::repeat_n;
 
 use super::Merge;
-use super::group::Member;
+use super::group::Group;
 use super::input::Taken;
 use crate::Error;
 use crate::record::{Field, Record};
@@ -46,38 +46,12 @@ pub(super) struct Combiner {
 	floats: Vec<f32>,
 	text: Vec<u8>,
 	counts: Vec<i32>,
+	slots: Vec<usize>,
+	ploidy: Vec<usize>,
 }
 
 fn nonzero(count: usize) -> usize {
 	count.max(1)
-}
-
-fn trailing_common(record: &Record) -> usize {
-	let reference = record.allele(0).unwrap_or_default();
-	if reference.len() < 2 {
-		return 0;
-	}
-	let mut length = 1;
-	while length < reference.len() {
-		let tail = reference
-			.len()
-			.checked_sub(length)
-			.and_then(|at| reference.get(at));
-		let mut finished = false;
-		for alt in record.alleles().skip(1) {
-			finished |= length >= alt.len();
-			let other = alt.len().checked_sub(length).and_then(|at| alt.get(at));
-			if other != tail {
-				finished = true;
-				break;
-			}
-		}
-		if finished {
-			break;
-		}
-		length += 1;
-	}
-	length - 1
 }
 
 fn copy_info(out: &mut Record, source: &Record, field: &Field) {
@@ -103,38 +77,120 @@ fn spread_size(number: Number, alleles: usize) -> usize {
 	}
 }
 
-fn scatter<T: Numeric>(target: &mut [T], values: &[T]) {
-	for (slot, &value) in target.iter_mut().zip(live(values)) {
-		if !value.is_missing() {
-			*slot = value;
+fn scatter<T: Numeric>(target: &mut [T], values: &[T], slots: &[usize]) {
+	for (&slot, &value) in slots.iter().zip(live(values)) {
+		if !value.is_missing()
+			&& let Some(target) = target.get_mut(slot)
+		{
+			*target = value;
 		}
 	}
 }
 
-fn gather<'a, T: Numeric + 'a>(
-	out: &mut Vec<T>,
-	sources: impl Iterator<Item = (usize, Option<(&'a [T], usize)>)>,
-	size: usize,
-) -> Result<(), Error> {
-	for (samples, source) in sources {
-		match source {
-			None => {
-				for _ in 0..samples {
-					out.push(T::MISSING);
-					out.extend(repeat_n(T::END, size - 1));
+fn size_alleles(number: Number, size: usize) -> usize {
+	match number {
+		Number::PerAlt => size + 1,
+		Number::PerGenotype => (1..=size)
+			.find(|&n| n * (n + 1) / 2 >= size)
+			.unwrap_or(size),
+		Number::PerAllele | Number::Fixed(_) | Number::Variable => size,
+	}
+}
+
+fn remapped(map: &[usize], alleles: usize) -> bool {
+	map.len() != alleles || map.iter().enumerate().any(|(at, &target)| at != target)
+}
+
+fn slots(number: Number, map: &[usize], out: &mut Vec<usize>) {
+	out.clear();
+	match number {
+		Number::PerAlt => out.extend(map.iter().skip(1).map(|&target| target.saturating_sub(1))),
+		Number::PerAllele => out.extend_from_slice(map),
+		Number::PerGenotype => {
+			for (row, &first) in map.iter().enumerate() {
+				for &second in map.iter().take(row + 1) {
+					let (high, low) = if first > second {
+						(first, second)
+					} else {
+						(second, first)
+					};
+					out.push(high * (high + 1) / 2 + low);
 				}
 			}
-			Some((values, width)) => {
-				let chunks = values.chunks_exact(width.max(1));
-				if chunks.len() < samples {
-					return Err(Error::Bcf("FORMAT field does not cover every sample"));
-				}
-				for chunk in chunks.take(samples) {
-					let kept = live(chunk);
-					let kept = kept.get(..kept.len().min(size)).unwrap_or(kept);
-					out.extend_from_slice(kept);
-					out.extend(repeat_n(T::END, size - kept.len()));
-				}
+		}
+		Number::Fixed(_) | Number::Variable => {}
+	}
+}
+
+fn genotype_allele(value: i32, map: &[usize]) -> i32 {
+	let allele = (value >> 1) - 1;
+	let Ok(index) = usize::try_from(allele) else {
+		return value;
+	};
+	match map.get(index) {
+		Some(&target) if index > 0 => {
+			i32::try_from(target + 1).map_or(value, |target| (target << 1) | (value & 1))
+		}
+		_ => value,
+	}
+}
+
+#[derive(Debug)]
+struct Plan<'a> {
+	number: Number,
+	map: &'a [usize],
+	slots: &'a [usize],
+	alleles: usize,
+}
+
+fn gather<T: Numeric>(
+	out: &mut Vec<T>,
+	samples: usize,
+	found: Option<(&[T], usize)>,
+	plan: Option<&Plan<'_>>,
+	ploidy: &[usize],
+	size: usize,
+) -> Result<(), Error> {
+	let Some((values, width)) = found else {
+		for _ in 0..samples {
+			out.push(T::MISSING);
+			out.extend(repeat_n(T::END, size.saturating_sub(1)));
+		}
+		return Ok(());
+	};
+	let chunks = values.chunks_exact(width.max(1));
+	if chunks.len() < samples {
+		return Err(Error::Bcf("FORMAT field does not cover every sample"));
+	}
+	for (index, chunk) in chunks.take(samples).enumerate() {
+		let Some(plan) = plan else {
+			let kept = live(chunk);
+			let kept = kept.get(..kept.len().min(size)).unwrap_or(kept);
+			out.extend_from_slice(kept);
+			out.extend(repeat_n(T::END, size - kept.len()));
+			continue;
+		};
+		let lone = chunk.first().is_some_and(|first| first.is_missing())
+			&& chunk.get(1).is_none_or(|next| next.is_end());
+		if lone {
+			out.push(T::MISSING);
+			out.extend(repeat_n(T::END, size.saturating_sub(1)));
+			continue;
+		}
+		let haploid = plan.number == Number::PerGenotype && ploidy.get(index) == Some(&1);
+		let used = if haploid { plan.alleles } else { size };
+		let start = out.len();
+		out.extend(repeat_n(T::MISSING, used));
+		out.extend(repeat_n(T::END, size.saturating_sub(used)));
+		let positions = if haploid { plan.map } else { plan.slots };
+		for (&slot, &value) in positions.iter().zip(chunk) {
+			if value.is_end() {
+				break;
+			}
+			if !value.is_missing()
+				&& let Some(target) = out.get_mut(start + slot)
+			{
+				*target = value;
 			}
 		}
 	}
@@ -173,8 +229,9 @@ fn sum_ints(sum: &mut Sum) -> Vec<i32> {
 	total
 }
 
-fn records<'a>(taken: &'a [Taken], group: &[Member]) -> Result<Vec<&'a Record>, Error> {
+fn records<'a>(taken: &'a [Taken], group: &Group) -> Result<Vec<&'a Record>, Error> {
 	group
+		.members
 		.iter()
 		.map(|member| {
 			taken
@@ -185,13 +242,49 @@ fn records<'a>(taken: &'a [Taken], group: &[Member]) -> Result<Vec<&'a Record>, 
 		.collect()
 }
 
-fn alleles(out: &mut Record, first: &Record) {
-	let trim = trailing_common(first);
-	out.set_alleles(first.alleles().map(|allele| {
-		allele
-			.get(..allele.len().saturating_sub(trim))
-			.unwrap_or(allele)
-	}));
+#[derive(Debug)]
+struct Layout<'a> {
+	samples: &'a [usize],
+	ploidy: &'a [usize],
+	present: &'a [Option<usize>],
+	taken: &'a [Taken],
+	group: &'a Group,
+	key: u32,
+	number: Number,
+	alleles: usize,
+	size: usize,
+}
+
+fn gather_all<'a, T: Numeric + 'a>(
+	out: &mut Vec<T>,
+	buffer: &mut Vec<usize>,
+	layout: &Layout<'a>,
+	values: impl Fn(&'a Record, &'a Field) -> &'a [T],
+) -> Result<(), Error> {
+	let mut offset = 0;
+	for input in 0..layout.samples.len() {
+		let samples = layout.samples.get(input).copied().unwrap_or(0);
+		let found = source(layout.present, layout.taken, input, layout.key)
+			.map(|(record, field)| (values(record, field), field.width));
+		let map = layout.group.map(input).unwrap_or_default();
+		let remap = matches!(
+			layout.number,
+			Number::PerAlt | Number::PerAllele | Number::PerGenotype
+		) && remapped(map, layout.alleles);
+		if remap {
+			slots(layout.number, map, buffer);
+		}
+		let plan = remap.then_some(Plan {
+			number: layout.number,
+			map,
+			slots: buffer.as_slice(),
+			alleles: layout.alleles,
+		});
+		let ploidy = layout.ploidy.get(offset..).unwrap_or_default();
+		gather(out, samples, found, plan.as_ref(), ploidy, layout.size)?;
+		offset += samples;
+	}
+	Ok(())
 }
 
 fn source<'a>(
@@ -221,6 +314,8 @@ impl Combiner {
 			floats: Vec::new(),
 			text: Vec::new(),
 			counts: Vec::new(),
+			slots: Vec::new(),
+			ploidy: Vec::new(),
 		}
 	}
 
@@ -228,11 +323,11 @@ impl Combiner {
 		&mut self,
 		merge: &Merge,
 		taken: &[Taken],
-		group: &[Member],
+		group: &Group,
 		out: &mut Record,
 	) -> Result<(), Error> {
 		self.present.fill(None);
-		for member in group {
+		for member in &group.members {
 			let slot = self
 				.present
 				.get_mut(member.input)
@@ -244,10 +339,11 @@ impl Combiner {
 		out.clear();
 		out.set_site(first.contig(), first.start());
 		self.identity(out, &records);
-		alleles(out, first);
+		out.set_alleles(group.alleles.iter().map(Vec::as_slice));
 		self.filters(merge, out, &records);
-		self.info(merge, out, &records, first.allele_count())?;
-		self.format(merge, taken, out, &records, first.allele_count())
+		let alleles = group.alleles.len();
+		self.info(merge, group, out, &records, alleles)?;
+		self.format(merge, taken, group, out, &records, alleles)
 	}
 
 	fn identity(&mut self, out: &mut Record, records: &[&Record]) {
@@ -291,6 +387,7 @@ impl Combiner {
 	fn info(
 		&mut self,
 		merge: &Merge,
+		group: &Group,
 		out: &mut Record,
 		records: &[&Record],
 		alleles: usize,
@@ -303,7 +400,7 @@ impl Combiner {
 		}
 		self.spread_count = 0;
 		self.seen.clear();
-		for record in records {
+		for (member, record) in group.members.iter().zip(records) {
 			for field in record.info() {
 				if merge.skipped.contains(&field.key) {
 					continue;
@@ -318,7 +415,7 @@ impl Combiner {
 					.map_or(Number::Variable, |definition| definition.number);
 				let size = spread_size(number, alleles);
 				if size > 0 {
-					self.add_spread(record, field, size);
+					self.add_spread(record, field, size, number, &member.map)?;
 				} else if !self.seen.contains(&field.key) {
 					self.seen.push(field.key);
 					copy_info(out, record, field);
@@ -405,15 +502,38 @@ impl Combiner {
 		index
 	}
 
-	fn add_spread(&mut self, record: &Record, field: &Field, size: usize) {
+	fn add_spread(
+		&mut self,
+		record: &Record,
+		field: &Field,
+		size: usize,
+		number: Number,
+		map: &[usize],
+	) -> Result<(), Error> {
 		let index = self.spread_index(field, size);
+		slots(number, map, &mut self.slots);
 		let Some(spread) = self.spreads.get_mut(index) else {
-			return;
+			return Ok(());
 		};
 		match &field.cells {
-			Cells::Ints(_) => scatter(&mut spread.ints, record.store.ints(&field.cells)),
-			Cells::Floats(_) => scatter(&mut spread.floats, record.store.floats(&field.cells)),
+			Cells::Ints(_) => scatter(
+				&mut spread.ints,
+				record.store.ints(&field.cells),
+				&self.slots,
+			),
+			Cells::Floats(_) => {
+				scatter(
+					&mut spread.floats,
+					record.store.floats(&field.cells),
+					&self.slots,
+				);
+			}
 			Cells::Text(_) => {
+				if remapped(map, size_alleles(number, size)) {
+					return Err(Error::Incompatible(
+						"string INFO tag with different alleles",
+					));
+				}
 				spread.text.clear();
 				spread
 					.text
@@ -421,6 +541,7 @@ impl Combiner {
 			}
 			Cells::Flag => {}
 		}
+		Ok(())
 	}
 
 	fn finish_spreads(&mut self, out: &mut Record) {
@@ -437,11 +558,13 @@ impl Combiner {
 		&mut self,
 		merge: &Merge,
 		taken: &[Taken],
+		group: &Group,
 		out: &mut Record,
 		records: &[&Record],
 		alleles: usize,
 	) -> Result<(), Error> {
 		self.keys.clear();
+		self.ploidy.clear();
 		let mut has_genotype = false;
 		for record in records {
 			for field in record.format() {
@@ -453,7 +576,7 @@ impl Combiner {
 			}
 		}
 		if let (true, Some(key)) = (has_genotype, merge.genotype) {
-			self.genotype(taken, key, out)?;
+			self.genotype(taken, group, key, out)?;
 			if let Some(keys) = merge.counts
 				&& out.count_alleles(keys.genotype, &mut self.counts)?
 			{
@@ -464,12 +587,18 @@ impl Combiner {
 		}
 		for index in 0..self.keys.len() {
 			let key = *self.keys.get(index).ok_or(Error::Limits("tags"))?;
-			self.field(merge, taken, key, alleles, out)?;
+			self.field(merge, taken, group, key, alleles, out)?;
 		}
 		Ok(())
 	}
 
-	fn genotype(&mut self, taken: &[Taken], key: u32, out: &mut Record) -> Result<(), Error> {
+	fn genotype(
+		&mut self,
+		taken: &[Taken],
+		group: &Group,
+		key: u32,
+		out: &mut Record,
+	) -> Result<(), Error> {
 		let mut size = 1;
 		for input in 0..self.samples.len() {
 			if let Some((record, field)) = source(&self.present, taken, input, key) {
@@ -479,22 +608,31 @@ impl Combiner {
 			}
 		}
 		self.ints.clear();
+		self.ploidy.clear();
 		for input in 0..self.samples.len() {
 			let samples = self.samples.get(input).copied().unwrap_or(0);
 			match source(&self.present, taken, input, key) {
-				None => self.ints.extend(repeat_n(0, samples * size)),
+				None => {
+					self.ints.extend(repeat_n(0, samples * size));
+					self.ploidy.extend(repeat_n(size, samples));
+				}
 				Some((record, field)) => {
 					let values = record.store.ints(&field.cells);
 					let chunks = values.chunks_exact(nonzero(field.width));
 					if chunks.len() < samples {
 						return Err(Error::Bcf("FORMAT field does not cover every sample"));
 					}
+					let map = group.map(input).unwrap_or_default();
 					for sample in chunks.take(samples) {
 						let kept = live(sample);
-						self.ints.extend(
-							kept.iter()
-								.map(|&value| if value == MISSING_INT { 0 } else { value }),
-						);
+						self.ploidy.push(kept.len());
+						self.ints.extend(kept.iter().map(|&value| {
+							if value == MISSING_INT {
+								0
+							} else {
+								genotype_allele(value, map)
+							}
+						}));
 						self.ints
 							.extend(repeat_n(END_INT, size.saturating_sub(kept.len())));
 					}
@@ -509,6 +647,7 @@ impl Combiner {
 		&mut self,
 		merge: &Merge,
 		taken: &[Taken],
+		group: &Group,
 		key: u32,
 		alleles: usize,
 		out: &mut Record,
@@ -529,34 +668,45 @@ impl Combiner {
 			0 => nonzero(widest),
 			size => size,
 		};
+		let layout = Layout {
+			samples: &self.samples,
+			ploidy: &self.ploidy,
+			present: &self.present,
+			taken,
+			group,
+			key,
+			number,
+			alleles,
+			size,
+		};
 		match cells {
 			Some(Cells::Ints(_)) => {
 				self.ints.clear();
-				let sources = (0..self.samples.len()).map(|input| {
-					let found = source(&self.present, taken, input, key);
-					(
-						self.samples.get(input).copied().unwrap_or(0),
-						found.map(|(record, field)| (record.store.ints(&field.cells), field.width)),
-					)
-				});
-				gather(&mut self.ints, sources, size)?;
+				gather_all(&mut self.ints, &mut self.slots, &layout, |record, field| {
+					record.store.ints(&field.cells)
+				})?;
 				out.push_format_ints(key, size, &self.ints);
 			}
 			Some(Cells::Floats(_)) => {
 				self.floats.clear();
-				let sources = (0..self.samples.len()).map(|input| {
-					let found = source(&self.present, taken, input, key);
-					(
-						self.samples.get(input).copied().unwrap_or(0),
-						found.map(|(record, field)| {
-							(record.store.floats(&field.cells), field.width)
-						}),
-					)
-				});
-				gather(&mut self.floats, sources, size)?;
+				gather_all(
+					&mut self.floats,
+					&mut self.slots,
+					&layout,
+					|record, field| record.store.floats(&field.cells),
+				)?;
 				out.push_format_floats(key, size, &self.floats);
 			}
 			Some(Cells::Text(_)) => {
+				let changed = group
+					.members
+					.iter()
+					.any(|member| remapped(&member.map, alleles));
+				if changed && spread_size(number, alleles) > 0 {
+					return Err(Error::Incompatible(
+						"string FORMAT tag with different alleles",
+					));
+				}
 				let width = self.text_field(taken, key, number, size)?;
 				out.push_format_text(key, width, &self.text);
 			}

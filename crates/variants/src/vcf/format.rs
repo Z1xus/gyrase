@@ -51,7 +51,7 @@ impl Record {
 	}
 }
 
-fn push_or_dot(out: &mut Vec<u8>, bytes: &[u8]) {
+pub(crate) fn push_or_dot(out: &mut Vec<u8>, bytes: &[u8]) {
 	if bytes.is_empty() {
 		out.push(b'.');
 	} else {
@@ -59,7 +59,7 @@ fn push_or_dot(out: &mut Vec<u8>, bytes: &[u8]) {
 	}
 }
 
-fn tag_name(header: &Header, key: u32) -> Result<&str, Error> {
+pub(crate) fn tag_name(header: &Header, key: u32) -> Result<&str, Error> {
 	header
 		.name(key)
 		.ok_or(Error::Bcf("tag id is not in the header"))
@@ -101,14 +101,14 @@ pub(crate) fn write_info(record: &Record, header: &Header, out: &mut Vec<u8>) ->
 fn push_cells(out: &mut Vec<u8>, store: &Store, cells: &Cells) {
 	match cells {
 		Cells::Flag => {}
-		Cells::Ints(_) => push_int_list(out, store.ints(cells)),
-		Cells::Floats(_) => push_float_list(out, store.floats(cells)),
+		Cells::Ints(_) => push_int_list(out, store.ints(cells).iter().copied()),
+		Cells::Floats(_) => push_float_list(out, store.floats(cells).iter().copied()),
 		Cells::Text(_) => push_text(out, store.text(cells)),
 	}
 }
 
-pub(crate) fn push_int_list(out: &mut Vec<u8>, values: &[i32]) {
-	for (index, &value) in values.iter().enumerate() {
+pub(crate) fn push_int_list(out: &mut Vec<u8>, values: impl Iterator<Item = i32>) {
+	for (index, value) in values.enumerate() {
 		if value == END_INT {
 			break;
 		}
@@ -123,8 +123,8 @@ pub(crate) fn push_int_list(out: &mut Vec<u8>, values: &[i32]) {
 	}
 }
 
-pub(crate) fn push_float_list(out: &mut Vec<u8>, values: &[f32]) {
-	for (index, &value) in values.iter().enumerate() {
+pub(crate) fn push_float_list(out: &mut Vec<u8>, values: impl Iterator<Item = f32>) {
+	for (index, value) in values.enumerate() {
 		if is_end_float(value) {
 			break;
 		}
@@ -187,9 +187,9 @@ fn write_sample_field(
 				.get(start..end)
 				.ok_or(Error::Bcf("FORMAT field is truncated"))?;
 			if header.name(field.key) == Some(GENOTYPE_KEY) {
-				write_genotype(out, values, header.version());
+				write_genotype(out, values.iter().copied(), header.version());
 			} else {
-				push_int_list(out, values);
+				push_int_list(out, values.iter().copied());
 			}
 		}
 		Cells::Floats(_) => {
@@ -198,7 +198,7 @@ fn write_sample_field(
 				.floats(&field.cells)
 				.get(start..end)
 				.ok_or(Error::Bcf("FORMAT field is truncated"))?;
-			push_float_list(out, values);
+			push_float_list(out, values.iter().copied());
 		}
 		Cells::Text(_) => {
 			let values = record
@@ -220,12 +220,16 @@ fn write_sample_field(
 	Ok(())
 }
 
-pub(crate) fn write_genotype(out: &mut Vec<u8>, values: &[i32], version: Version) {
+pub(crate) fn write_genotype(
+	out: &mut Vec<u8>,
+	values: impl Iterator<Item = i32>,
+	version: Version,
+) {
 	let begin = out.len();
 	let mut first = 0;
 	let mut any_unphased = false;
 	let mut ploidy = 0usize;
-	for (index, &value) in values.iter().enumerate() {
+	for (index, value) in values.enumerate() {
 		if value == END_INT {
 			break;
 		}

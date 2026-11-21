@@ -1,6 +1,7 @@
 mod combine;
 mod group;
 mod input;
+mod pairing;
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -20,9 +21,21 @@ const FLUSH_RECORDS: usize = 4096;
 const SUMMED: [&str; 2] = ["DP", "DP4"];
 const SUMMED_WITHOUT_SAMPLES: [&str; 2] = ["AC", "AN"];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Collapse {
+	None,
+	Snps,
+	Indels,
+	#[default]
+	Both,
+	All,
+	Exact,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct MergeOptions {
 	pub format: Format,
+	pub collapse: Collapse,
 }
 
 #[derive(Debug)]
@@ -35,6 +48,7 @@ pub(crate) struct Rule {
 pub struct Merge {
 	header: Header,
 	format: Format,
+	collapse: Collapse,
 	rules: Vec<Rule>,
 	skipped: Vec<u32>,
 	counts: Option<CountKeys>,
@@ -87,6 +101,7 @@ impl Merge {
 			pass: header.key("PASS"),
 			header,
 			format: options.format,
+			collapse: options.collapse,
 			rules,
 			skipped,
 			counts,
@@ -144,8 +159,8 @@ impl Merge {
 					heap.push(Reverse((next, index)));
 				}
 			}
-			groups.build(&taken, &ready)?;
-			for group in groups.ordered() {
+			groups.build(&taken, &ready, self.collapse)?;
+			for group in groups.iter() {
 				combiner.combine(self, &taken, group, &mut record)?;
 				formatter.push_record(&self.header, &record, &mut encoded)?;
 			}

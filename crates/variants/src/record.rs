@@ -251,6 +251,10 @@ impl Record {
 	}
 
 	pub fn keep_samples(&mut self, keep: &[usize]) -> Result<(), Error> {
+		if keep.is_empty() {
+			self.format.clear();
+			return Ok(());
+		}
 		for field in &mut self.format {
 			let width = field.width;
 			let (range, copied) = match &field.cells {

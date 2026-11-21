@@ -36,6 +36,15 @@ pub(super) fn render<S: Site>(
 	Ok(())
 }
 
+fn format_columns<S: Site>(header: &Header, site: &S, out: &mut QueryOutput) -> Result<(), Error> {
+	site.read_record(header, &mut out.record)?;
+	out.line.clear();
+	out.record.write_vcf(header, &mut out.line)?;
+	let columns = out.line.splitn(9, |&byte| byte == b'\t').nth(8);
+	out.bytes.extend_from_slice(columns.unwrap_or(&[MISSING]));
+	Ok(())
+}
+
 fn emit<S: Site>(
 	field: Field,
 	header: &Header,
@@ -88,6 +97,7 @@ fn emit<S: Site>(
 			site.read_record(header, &mut out.record)?;
 			write_info(&out.record, header, &mut out.bytes)?;
 		}
+		Field::FormatKeys => format_columns(header, site, out)?,
 		Field::Info { key, subscript } => {
 			let found = site.info(header, key, &mut out.loaded)?;
 			info(&out.loaded, found, subscript, &mut out.bytes);
@@ -253,7 +263,7 @@ fn genotype<S: Site>(
 	let values = out.loaded.sample_ints(sample);
 	if !target {
 		let before = out.bytes.len();
-		write_genotype(&mut out.bytes, values, header.version());
+		write_genotype(&mut out.bytes, values.iter().copied(), header.version());
 		if out.bytes.len() == before {
 			out.bytes.push(MISSING);
 		}
@@ -301,7 +311,7 @@ fn scalar_float(value: Option<f32>, out: &mut Vec<u8>) {
 
 fn array_ints(values: &[i32], out: &mut Vec<u8>) {
 	let before = out.len();
-	push_int_list(out, values);
+	push_int_list(out, values.iter().copied());
 	if out.len() == before && !values.is_empty() {
 		out.push(MISSING);
 	}
@@ -309,7 +319,7 @@ fn array_ints(values: &[i32], out: &mut Vec<u8>) {
 
 fn array_floats(values: &[f32], out: &mut Vec<u8>) {
 	let before = out.len();
-	push_float_list(out, values);
+	push_float_list(out, values.iter().copied());
 	if out.len() == before && !values.is_empty() {
 		out.push(MISSING);
 	}

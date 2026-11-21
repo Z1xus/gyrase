@@ -39,6 +39,7 @@ pub(crate) enum Field {
 	Qual,
 	Filter,
 	InfoAll,
+	FormatKeys,
 	Info { key: u32, subscript: Option<usize> },
 	Format { key: u32, subscript: Option<usize> },
 	Genotype,

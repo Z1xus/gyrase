@@ -249,6 +249,14 @@ impl Header {
 		Ok(header)
 	}
 
+	pub fn without_formats(&self) -> Self {
+		let mut header = self.clone();
+		header
+			.lines
+			.retain(|line| !line.text.starts_with("##FORMAT="));
+		header
+	}
+
 	pub fn with_lines(&self, extra: &[&str]) -> Result<Self, Error> {
 		let mut meta: Vec<&str> = self.meta_lines().collect();
 		meta.extend_from_slice(extra);

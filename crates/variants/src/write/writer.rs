@@ -35,6 +35,10 @@ impl<S: Sink> Writer<S> {
 		Ok(Self { sink })
 	}
 
+	pub fn without_header(sink: S) -> Self {
+		Self { sink }
+	}
+
 	pub fn write(
 		&mut self,
 		encoded: &Encoded,

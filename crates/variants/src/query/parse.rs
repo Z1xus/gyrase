@@ -98,6 +98,7 @@ fn field(bytes: &[u8], at: &mut usize, header: &Header, per_sample: bool) -> Res
 		"QUAL" => Some(Field::Qual),
 		"FILTER" => Some(Field::Filter),
 		"INFO" => Some(Field::InfoAll),
+		"FORMAT" => Some(Field::FormatKeys),
 		"GT" if per_sample => Some(Field::Genotype),
 		"TGT" if per_sample => Some(Field::TargetGenotype),
 		"SAMPLE" if per_sample => Some(Field::Sample),

@@ -25,7 +25,7 @@ pub use error::Error;
 pub use filter::{Filter, Scratch as FilterScratch};
 pub use header::{ContigEntry, FieldDef, Header, StringEntry, Version};
 pub use index::{IndexCollector, IndexKind};
-pub use merge::{Merge, MergeOptions};
+pub use merge::{Collapse, Merge, MergeOptions};
 pub use norm::{Duplicates, Mismatch, Norm, NormOptions, NormOutput, NormStats, Splitting};
 pub use query::{Query, QueryOptions, QueryOutput};
 pub use read::{
