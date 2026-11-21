@@ -11,6 +11,10 @@ impl Cancel {
 		self.0.store(true, Ordering::Relaxed);
 	}
 
+	pub(crate) fn flag(&self) -> &AtomicBool {
+		&self.0
+	}
+
 	pub fn check(&self) -> Result<(), Error> {
 		if self.0.load(Ordering::Relaxed) {
 			Err(Error::Cancelled)

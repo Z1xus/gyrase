@@ -144,10 +144,12 @@ impl Read {
 				)
 			})
 			.collect();
-		let found = tokens.iter().rev().find_map(|&(start, token)| match token {
-			"R1" | "1" => Some((start, token, Mate::First)),
-			"R2" | "2" => Some((start, token, Mate::Second)),
-			_ => None,
+		let found = tokens.iter().rev().find_map(|&(start, token)| {
+			match token.to_ascii_uppercase().as_str() {
+				"R1" | "1" => Some((start, token, Mate::First)),
+				"R2" | "2" => Some((start, token, Mate::Second)),
+				_ => None,
+			}
 		});
 		let sample_end = tokens
 			.iter()
@@ -155,7 +157,10 @@ impl Read {
 				found.is_some_and(|(at, ..)| at == *start) || is_lane(token) || is_index(token)
 			})
 			.map_or(stem.len(), |&(start, _)| start - 1);
-		let sample = stem[..sample_end].to_owned();
+		let sample = match &stem[..sample_end] {
+			"" => stem.clone(),
+			named => named.to_owned(),
+		};
 		match found {
 			Some((start, token, mate)) => {
 				let lane = format!("{}{}", &stem[..start], &stem[start + token.len()..]);
@@ -193,11 +198,10 @@ fn stem(path: &Path) -> String {
 		.file_name()
 		.map(|name| name.to_string_lossy().into_owned())
 		.unwrap_or_default();
-	while let Some(stripped) = EXTENSIONS
-		.iter()
-		.find_map(|extension| name.strip_suffix(extension))
-	{
-		name = stripped.to_owned();
+	while let Some(extension) = EXTENSIONS.iter().find(|extension| {
+		name.len() > extension.len() && name.to_ascii_lowercase().ends_with(*extension)
+	}) {
+		name.truncate(name.len() - extension.len());
 	}
 	name
 }

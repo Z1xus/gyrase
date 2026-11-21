@@ -28,10 +28,12 @@ pub enum Error {
 	Genome(#[from] gyrase_genome::Error),
 	#[error("{0}: no BAM or CRAM index next to it")]
 	MissingIndex(PathBuf),
-	#[error("{0}: not a BAM or CRAM file")]
+	#[error("{0}: not a FASTQ, SAM, BAM, CRAM or VCF file")]
 	NotAlignments(PathBuf),
 	#[error("{0}: no sample in the file")]
 	NoSamples(PathBuf),
+	#[error("{0}: choose at least one raw data format")]
+	NoFormats(PathBuf),
 	#[error("{0}: cannot tell the genome build from the contigs")]
 	UnknownBuild(PathBuf),
 	#[error("contig missing from the reference")]

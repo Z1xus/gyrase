@@ -4,6 +4,7 @@ mod file;
 
 use std::ops::Range;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
 use gyrase_genome::{Contigs, Reference};
 use gyrase_io::Workers;
@@ -36,9 +37,10 @@ impl Index {
 		reference: &Reference,
 		config: SeedConfig,
 		workers: &Workers,
+		stop: &AtomicBool,
 	) -> Result<Self, Error> {
 		let packed = PackedReference::from_fasta(reference, workers)?;
-		build::build(packed, config, workers)
+		build::build(packed, config, workers, stop)
 	}
 
 	pub fn load_or_build(
@@ -46,13 +48,14 @@ impl Index {
 		reference: &Reference,
 		config: SeedConfig,
 		workers: &Workers,
+		stop: &AtomicBool,
 	) -> Result<Self, Error> {
 		let packed = PackedReference::from_fasta(reference, workers)?;
 		let packed = match file::reuse(path, packed, config, workers) {
 			file::Reuse::Loaded(index) => return Ok(*index),
 			file::Reuse::Stale(packed) => packed,
 		};
-		let index = build::build(packed, config, workers)?;
+		let index = build::build(packed, config, workers, stop)?;
 		index.save(path, workers)?;
 		Ok(index)
 	}

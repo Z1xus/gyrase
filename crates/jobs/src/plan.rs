@@ -22,7 +22,7 @@ use crate::{
 
 const IO_THREADS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(1);
 const THREAD_MEMORY: u64 = 512 << 20;
-const DEFAULT_BUILD: Build = Build::Grch38;
+const ALIGNED_BUILD: Build = Build::Grch38;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
@@ -74,6 +74,9 @@ impl Plan {
 				.collect()
 		};
 		if let Source::Variants(input) = &sample.source {
+			if request.formats.is_empty() {
+				return Err(Error::NoFormats(input.path.clone()));
+			}
 			let build = genotypes::build(input, &Workers::new(IO_THREADS)?)?;
 			CallBuild::try_from(build)?;
 			return Ok(Self {
@@ -90,7 +93,8 @@ impl Plan {
 		let (build, steps, alignments) = match &sample.source {
 			Source::Alignments(input) => {
 				let header = header(input, None, &Workers::new(IO_THREADS)?)?;
-				let build = Build::detect(&header.contigs()?).unwrap_or(DEFAULT_BUILD);
+				let build = Build::detect(&header.contigs()?)
+					.ok_or_else(|| Error::UnknownBuild(input.path.clone()))?;
 				match (input.kind, indexed(input), coordinate_sorted(&header)) {
 					(Kind::Bam | Kind::Cram, true, _) => (build, Vec::new(), None),
 					(Kind::Bam | Kind::Cram, false, true) => (build, vec![Stage::Index], None),
@@ -98,7 +102,7 @@ impl Plan {
 				}
 			}
 			Source::Reads(_) => (
-				DEFAULT_BUILD,
+				ALIGNED_BUILD,
 				vec![Stage::Align, Stage::Sort],
 				Some(file("bam")),
 			),
@@ -318,13 +322,11 @@ impl Plan {
 	) -> Result<(), Error> {
 		let preparing = self.stages.contains(&Stage::Reference);
 		let mut estimate = Estimate::new(Stage::Reference, 1, Instant::now());
-		if preparing {
-			report(estimate.progress());
-		}
 		let index = align::index(
 			reference,
 			&store.aligner_index_path(self.build),
 			&pools.compute,
+			cancel,
 		)?;
 		if preparing {
 			report(estimate.advance(1, Instant::now()));

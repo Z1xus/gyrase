@@ -19,7 +19,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug)]
 pub struct Vcf {
 	path: PathBuf,
-	partial: Partial,
 	header: Header,
 	keys: Keys,
 	writer: Writer<Sink>,
@@ -28,6 +27,7 @@ pub struct Vcf {
 	encoded: Encoded,
 	collector: IndexCollector,
 	text: Vec<u8>,
+	partial: Partial,
 }
 
 #[derive(Debug, Clone, Copy)]

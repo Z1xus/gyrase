@@ -16,6 +16,8 @@ pub enum Error {
 	InvalidSeeding(&'static str),
 	#[error("reference has {length} bases, the index limit is {limit}")]
 	ReferenceTooLong { length: u64, limit: u64 },
+	#[error("cancelled")]
+	Cancelled,
 	#[error("reference has no seedable sequence")]
 	EmptyReference,
 	#[error("not a synapton index file")]

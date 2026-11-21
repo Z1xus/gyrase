@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use flate2::bufread::MultiGzDecoder;
 use gyrase_genome::{Build, Reference};
@@ -11,6 +12,7 @@ use crate::{Cancel, Error};
 
 const APP: &str = "gyrase";
 const COPY_LEN: usize = 1 << 20;
+const TIMEOUT: Duration = Duration::from_secs(60);
 const NUCLEAR: [&str; 24] = [
 	"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17",
 	"18", "19", "20", "21", "22", "X", "Y",
@@ -72,7 +74,13 @@ impl Store {
 			path: parent.to_owned(),
 			source,
 		})?;
-		let response = ureq::get(source(build)).call().map_err(Box::new)?;
+		let agent = ureq::Agent::new_with_config(
+			ureq::Agent::config_builder()
+				.timeout_connect(Some(TIMEOUT))
+				.timeout_per_read(Some(TIMEOUT))
+				.build(),
+		);
+		let response = agent.get(source(build)).call().map_err(Box::new)?;
 		let total = response.body().content_length();
 		let mut metered = Metered {
 			inner: response.into_body().into_reader(),
@@ -100,14 +108,24 @@ impl Store {
 				total,
 			});
 		}
+		let received = decoder.get_ref().get_ref().received;
+		if total.is_some_and(|total| total != received) {
+			return Err(Error::Download(Box::new(ureq::Error::Io(
+				io::ErrorKind::UnexpectedEof.into(),
+			))));
+		}
 		output
 			.into_inner()
 			.map_err(|error| created(error.into_error()))?
 			.sync_all()
 			.map_err(created)?;
-		verify(partial.path(), build)?;
+		let index = suffixed(partial.path(), ".fai");
+		if let Err(error) = verify(partial.path(), build) {
+			let _ = fs::remove_file(&index);
+			return Err(error);
+		}
 		partial.commit()?;
-		fs::rename(suffixed(&path, ".part.fai"), suffixed(&path, ".fai")).map_err(created)?;
+		fs::rename(index, suffixed(&path, ".fai")).map_err(created)?;
 		Ok(path)
 	}
 }

@@ -40,13 +40,33 @@ enum Source {
 enum Verdict {
 	Skip,
 	Missing,
-	Call(SiteCall),
+	Call(SiteCall, Option<Allele>),
 }
 
-impl From<Option<SiteCall>> for Verdict {
-	fn from(call: Option<SiteCall>) -> Self {
-		call.map_or(Self::Missing, Self::Call)
+impl Verdict {
+	fn of(call: Option<SiteCall>, reference: Option<Allele>) -> Self {
+		call.map_or(Self::Missing, |call| Self::Call(call, reference))
 	}
+}
+
+fn combine(kept: SiteCall, added: SiteCall, reference: Option<Allele>) -> SiteCall {
+	let pick = |current: Allele, other: Allele| {
+		if Some(current) == reference {
+			other
+		} else {
+			current
+		}
+	};
+	let genotype = match (kept.genotype, added.genotype) {
+		(Genotype::Pair(first, second), Genotype::Pair(other, then)) => {
+			Genotype::Pair(pick(first, other), pick(second, then))
+		}
+		(Genotype::Hemizygous(only), Genotype::Hemizygous(other)) => {
+			Genotype::Hemizygous(pick(only, other))
+		}
+		(genotype, _) => genotype,
+	};
+	SiteCall { genotype, ..kept }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -427,10 +447,10 @@ impl<'a> Collector<'a> {
 		else {
 			return;
 		};
-		let call = match verdict {
+		let (call, reference) = match verdict {
 			Verdict::Skip => return,
-			Verdict::Missing => SiteCall::MISSING,
-			Verdict::Call(call) => call,
+			Verdict::Missing => (SiteCall::MISSING, None),
+			Verdict::Call(call, reference) => (call, reference),
 		};
 		if block {
 			if *source == Source::None {
@@ -440,6 +460,8 @@ impl<'a> Collector<'a> {
 		} else if *source != Source::Record || *slot == SiteCall::MISSING {
 			*source = Source::Record;
 			*slot = call;
+		} else if call != SiteCall::MISSING {
+			*slot = combine(*slot, call, reference);
 		}
 	}
 
@@ -504,7 +526,10 @@ impl<'a> Collector<'a> {
 			alleles: [Some(0); PLOIDY_LIMIT],
 			ploidy: PLOIDY_LIMIT,
 		});
-		make_call(genotype, |index| (index == 0).then_some(reference), support).into()
+		Verdict::of(
+			make_call(genotype, |index| (index == 0).then_some(reference), support),
+			Some(reference),
+		)
 	}
 
 	fn variant_call(
@@ -549,7 +574,7 @@ impl<'a> Collector<'a> {
 				None
 			}
 		};
-		make_call(genotype, allele, support).into()
+		Verdict::of(make_call(genotype, allele, support), base)
 	}
 
 	fn finish(mut self, build: Build) -> Genotypes {
@@ -714,5 +739,5 @@ fn indel_call(
 		None => reference,
 		Some(alt) => kinds.get(alt).copied().flatten(),
 	};
-	make_call(genotype, allele, support).into()
+	Verdict::of(make_call(genotype, allele, support), reference)
 }

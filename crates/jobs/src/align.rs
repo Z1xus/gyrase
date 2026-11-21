@@ -43,19 +43,29 @@ pub(crate) struct Alignment<'a> {
 	pub cancel: &'a Cancel,
 }
 
-pub(crate) fn index(reference: &Reference, path: &Path, workers: &Workers) -> Result<Index, Error> {
+pub(crate) fn index(
+	reference: &Reference,
+	path: &Path,
+	workers: &Workers,
+	cancel: &Cancel,
+) -> Result<Index, Error> {
 	if let Some(parent) = path.parent() {
 		std::fs::create_dir_all(parent).map_err(|source| Error::Write {
 			path: parent.to_owned(),
 			source,
 		})?;
 	}
-	Ok(Index::load_or_build(
+	Index::load_or_build(
 		path,
 		reference,
 		SeedConfig::short_read(),
 		workers,
-	)?)
+		cancel.flag(),
+	)
+	.map_err(|error| match error {
+		synapton::Error::Cancelled => Error::Cancelled,
+		error => Error::Align(error),
+	})
 }
 
 impl Alignment<'_> {

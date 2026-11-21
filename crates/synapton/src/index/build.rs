@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use gyrase_io::Workers;
 use rayon::prelude::*;
@@ -60,7 +60,15 @@ pub(super) fn build(
 	reference: PackedReference,
 	config: SeedConfig,
 	workers: &Workers,
+	stop: &AtomicBool,
 ) -> Result<Index, Error> {
+	let stopped = || {
+		if stop.load(Ordering::Relaxed) {
+			Err(Error::Cancelled)
+		} else {
+			Ok(())
+		}
+	};
 	let blocks = blocks(&reference);
 	let overlap = (MAX_STROBE_OFFSET + config.k + 1) as u64;
 	let estimate = estimate_seeds(&reference, &config);
@@ -78,6 +86,9 @@ pub(super) fn build(
 		blocks.par_iter().for_each_init(
 			|| Extractor::new(config),
 			|extractor, block| {
+				if stop.load(Ordering::Relaxed) {
+					return;
+				}
 				for seed in extractor.seeds(&reference, block, overlap) {
 					let (bucket, _) = entry::split_key(seed.key, bucket_bits);
 					if let Some(count) = counts.get(bucket) {
@@ -87,6 +98,7 @@ pub(super) fn build(
 			},
 		);
 	});
+	stopped()?;
 
 	let mut buckets = Vec::with_capacity(bucket_count + 1);
 	let mut total = 0u64;
@@ -106,6 +118,9 @@ pub(super) fn build(
 		blocks.par_iter().for_each_init(
 			|| Extractor::new(config),
 			|extractor, block| {
+				if stop.load(Ordering::Relaxed) {
+					return;
+				}
 				let flat_start = block.span.start + block.start;
 				for seed in extractor.seeds(&reference, block, overlap) {
 					let (bucket, tag) = entry::split_key(seed.key, bucket_bits);
@@ -123,9 +138,11 @@ pub(super) fn build(
 		);
 	});
 	drop(cursors);
+	stopped()?;
 	let mut entries: Vec<u64> = slots.into_iter().map(AtomicU64::into_inner).collect();
 
 	let histogram = workers.install(|| sort_buckets(&mut entries, &buckets));
+	stopped()?;
 	let filter_cutoff = filter_cutoff(&histogram);
 	Ok(Index {
 		config,

@@ -226,9 +226,8 @@ impl Calling<'_> {
 			let mut pending = BTreeMap::new();
 			let mut ready = 0;
 			for (index, calls) in receiver {
-				pending.insert(index, calls);
-				while let Some(calls) = pending.remove(&ready) {
-					let Calls { discovered, known } = calls?;
+				pending.insert(index, calls?);
+				while let Some(Calls { discovered, known }) = pending.remove(&ready) {
 					let shard = shards.get(ready).ok_or(Error::UnknownContig)?;
 					emit(shard, &discovered)?;
 					for (slot, call) in genotyped[target_range(targets, shard)]

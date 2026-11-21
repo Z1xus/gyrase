@@ -13,7 +13,7 @@ pub(crate) struct Partial {
 impl Partial {
 	pub(crate) fn create(target: &Path) -> Result<(Self, File), Error> {
 		let partial = Self {
-			path: suffixed(target, ".part"),
+			path: suffixed(target, &format!(".{}.part", std::process::id())),
 			target: target.to_owned(),
 		};
 		let file = File::create(&partial.path).map_err(|source| Error::Write {
