@@ -6,6 +6,7 @@ const MIN_SEED_LENGTH: i32 = 19;
 const LONG_READ_LENGTH: f64 = 50.0;
 const MAX_MAPQ: i32 = 60;
 const MAPQ_SCALE: f64 = 1.2;
+const UNOPPOSED_SCALE: f64 = 6.02;
 const REPEAT_SCALE: f64 = 4.343;
 const ROUNDING: f64 = 0.499;
 const OVERLAP_DIVISOR: u32 = 2;
@@ -93,12 +94,14 @@ pub(crate) fn paired(
 	scoring: &Scoring,
 	best_pair: i32,
 	runner_up: i32,
+	opposed: bool,
 	competing: u32,
 	repeat_fraction: f32,
 ) -> u8 {
 	let matched = i32::from(scoring.matched);
 	let gap = f64::from(best_pair - runner_up) / f64::from(matched);
-	let mut mapq = (MAPQ_SCALE * gap + ROUNDING).floor();
+	let scale = if opposed { MAPQ_SCALE } else { UNOPPOSED_SCALE };
+	let mut mapq = (scale * gap + ROUNDING).floor();
 	if competing > 0 {
 		mapq -= (REPEAT_SCALE * f64::from(competing + 1).ln() + ROUNDING).floor();
 	}

@@ -120,6 +120,7 @@ pub(crate) struct PairChoice {
 	pub(crate) second: usize,
 	pub(crate) score: i32,
 	pub(crate) runner_up: i32,
+	pub(crate) opposed: bool,
 	pub(crate) competing: u32,
 }
 
@@ -162,6 +163,7 @@ pub(crate) fn choose_pair(
 		second: right,
 		score,
 		runner_up: others().max().unwrap_or(i32::MIN).max(unpaired),
+		opposed: others().next().is_some(),
 		competing: u32_of(others().filter(|&other| other + near >= score).count()),
 	})
 }

@@ -786,6 +786,7 @@ impl<'a> Worker<'a> {
 			&self.config.scoring,
 			choice.score,
 			choice.runner_up,
+			choice.opposed,
 			choice.competing,
 			repeat,
 		);
