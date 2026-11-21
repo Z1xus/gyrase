@@ -8,7 +8,7 @@ use crate::{App, Chip, Step, View, Written, labels};
 
 const STOPPING: &str = "Stopping…";
 
-pub fn screen(app: &App, screen: &Screen) {
+pub(crate) fn screen(app: &App, screen: &Screen) {
 	match screen {
 		Screen::Pick(error) => status(app, View::Pick, error.as_deref()),
 		Screen::Ready(prepared) => {
@@ -36,7 +36,7 @@ pub fn screen(app: &App, screen: &Screen) {
 	}
 }
 
-pub fn progress(app: &App, progress: Progress, fraction: f32) {
+pub(crate) fn progress(app: &App, progress: Progress, fraction: f32) {
 	if app.get_view() != View::Running {
 		return;
 	}

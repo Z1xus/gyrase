@@ -5,7 +5,7 @@ use slint::{
 
 use crate::App;
 
-pub fn attach(app: &App) {
+pub(crate) fn attach(app: &App) {
 	let weak = app.as_weak();
 	app.on_drag_window(move |point| {
 		if let Some(app) = weak.upgrade() {

@@ -7,14 +7,14 @@ use crate::message;
 
 const SINGLE_SAMPLE: &str = "Add one sample at a time.";
 
-pub struct Prepared {
-	pub plan: Plan,
-	pub formats: Vec<Format>,
-	pub output: PathBuf,
+pub(crate) struct Prepared {
+	pub(crate) plan: Plan,
+	pub(crate) formats: Vec<Format>,
+	pub(crate) output: PathBuf,
 }
 
 impl Prepared {
-	pub fn open(paths: &[PathBuf]) -> Result<Self, String> {
+	pub(crate) fn open(paths: &[PathBuf]) -> Result<Self, String> {
 		let inputs = paths
 			.iter()
 			.map(|path| Input::open(path))
@@ -30,18 +30,18 @@ impl Prepared {
 		Self::plan(sample, Format::ALL.to_vec(), output.to_owned())
 	}
 
-	pub fn toggled(&self, format: Format) -> Vec<Format> {
+	pub(crate) fn toggled(&self, format: Format) -> Vec<Format> {
 		Format::ALL
 			.into_iter()
 			.filter(|&candidate| (candidate == format) ^ self.formats.contains(&candidate))
 			.collect()
 	}
 
-	pub fn with(&self, formats: Vec<Format>, output: PathBuf) -> Result<Self, String> {
+	pub(crate) fn with(&self, formats: Vec<Format>, output: PathBuf) -> Result<Self, String> {
 		Self::plan(self.plan.sample.clone(), formats, output)
 	}
 
-	pub fn replanned(self) -> Self {
+	pub(crate) fn replanned(self) -> Self {
 		self.with(self.formats.clone(), self.output.clone())
 			.unwrap_or(self)
 	}

@@ -11,7 +11,7 @@ use crate::{App, Session};
 
 const SAME_DROP: Duration = Duration::from_millis(30);
 
-pub fn accept(app: &App, session: &Session) {
+pub(crate) fn accept(app: &App, session: &Session) {
 	let weak = app.as_weak();
 	let session = session.clone();
 	let dropped = Rc::new(RefCell::new(Vec::new()));

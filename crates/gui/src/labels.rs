@@ -10,7 +10,7 @@ const SIZE_UNITS: [(u64, &str); 3] = [(1_000_000_000, "GB"), (1_000_000, "MB"), 
 const MINUTE: u64 = 60;
 const HOUR: u64 = 3600;
 
-pub const fn format(format: Format) -> &'static str {
+pub(crate) const fn format(format: Format) -> &'static str {
 	match format {
 		Format::TwentyThreeAndMeV5 => "23andMe",
 		Format::AncestryV2 => "Ancestry",
@@ -20,7 +20,7 @@ pub const fn format(format: Format) -> &'static str {
 	}
 }
 
-pub const fn kind(kind: Kind) -> &'static str {
+pub(crate) const fn kind(kind: Kind) -> &'static str {
 	match kind {
 		Kind::Fastq => "FASTQ",
 		Kind::Fasta => "FASTA",
@@ -32,7 +32,7 @@ pub const fn kind(kind: Kind) -> &'static str {
 	}
 }
 
-pub const fn step_kind(stage: Stage) -> StepKind {
+pub(crate) const fn step_kind(stage: Stage) -> StepKind {
 	match stage {
 		Stage::Reference => StepKind::Reference,
 		Stage::Index => StepKind::Index,
@@ -43,7 +43,7 @@ pub const fn step_kind(stage: Stage) -> StepKind {
 	}
 }
 
-pub const fn step(stage: Stage) -> &'static str {
+pub(crate) const fn step(stage: Stage) -> &'static str {
 	match stage {
 		Stage::Reference => "Prepare reference",
 		Stage::Index => "Index file",
@@ -54,7 +54,7 @@ pub const fn step(stage: Stage) -> &'static str {
 	}
 }
 
-pub const fn activity(stage: Stage) -> &'static str {
+pub(crate) const fn activity(stage: Stage) -> &'static str {
 	match stage {
 		Stage::Reference => "Preparing reference…",
 		Stage::Index => "Indexing…",
@@ -65,7 +65,7 @@ pub const fn activity(stage: Stage) -> &'static str {
 	}
 }
 
-pub fn size(bytes: u64) -> String {
+pub(crate) fn size(bytes: u64) -> String {
 	SIZE_UNITS
 		.iter()
 		.find(|(unit, _)| bytes >= *unit)
@@ -78,7 +78,7 @@ pub fn size(bytes: u64) -> String {
 		)
 }
 
-pub fn eta(remaining: Duration) -> String {
+pub(crate) fn eta(remaining: Duration) -> String {
 	let seconds = remaining.as_secs();
 	if seconds < MINUTE {
 		format!("{seconds} s left")
@@ -89,7 +89,7 @@ pub fn eta(remaining: Duration) -> String {
 	}
 }
 
-pub fn grouped(value: usize) -> String {
+pub(crate) fn grouped(value: usize) -> String {
 	let digits = value.to_string();
 	let mut grouped = String::new();
 	for (index, digit) in digits.chars().enumerate() {
@@ -101,7 +101,7 @@ pub fn grouped(value: usize) -> String {
 	grouped
 }
 
-pub fn file_name(path: &Path) -> String {
+pub(crate) fn file_name(path: &Path) -> String {
 	path.file_name()
 		.map(|name| name.to_string_lossy().into_owned())
 		.unwrap_or_default()

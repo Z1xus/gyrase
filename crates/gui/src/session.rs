@@ -10,36 +10,36 @@ use crate::{App, dialogs, run, show};
 const FOLDER_FAILED: &str = "Couldn't open the folder.";
 
 #[derive(Clone)]
-pub struct Session {
+pub(crate) struct Session {
 	screen: Arc<Mutex<Screen>>,
 	app: Weak<App>,
 }
 
 impl Session {
-	pub fn new(app: &App) -> Self {
+	pub(crate) fn new(app: &App) -> Self {
 		Self {
 			screen: Arc::default(),
 			app: app.as_weak(),
 		}
 	}
 
-	pub fn app(&self) -> Weak<App> {
+	pub(crate) fn app(&self) -> Weak<App> {
 		self.app.clone()
 	}
 
-	pub fn update(&self, change: impl FnOnce(Screen) -> Screen) {
+	pub(crate) fn update(&self, change: impl FnOnce(Screen) -> Screen) {
 		if let Some(app) = self.app.upgrade() {
 			self.apply(&app, change);
 		}
 	}
 
-	pub fn apply(&self, app: &App, change: impl FnOnce(Screen) -> Screen) {
+	pub(crate) fn apply(&self, app: &App, change: impl FnOnce(Screen) -> Screen) {
 		let mut screen = self.lock();
 		*screen = change(mem::take(&mut *screen));
 		show::screen(app, &screen);
 	}
 
-	pub fn finish(&self, app: &App, outcome: Result<Report, Error>) {
+	pub(crate) fn finish(&self, app: &App, outcome: Result<Report, Error>) {
 		let exit = self.lock().exit();
 		self.apply(app, |screen| screen.finish(outcome));
 		if exit == Exit::Quit {
@@ -47,7 +47,7 @@ impl Session {
 		}
 	}
 
-	pub fn close(&self) -> CloseRequestResponse {
+	pub(crate) fn close(&self) -> CloseRequestResponse {
 		let Some(app) = self.app.upgrade() else {
 			return CloseRequestResponse::HideWindow;
 		};
@@ -58,7 +58,7 @@ impl Session {
 		}
 	}
 
-	pub fn connect(&self, app: &App) {
+	pub(crate) fn connect(&self, app: &App) {
 		app.on_choose_file({
 			let session = self.clone();
 			move || {

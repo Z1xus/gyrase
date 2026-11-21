@@ -2,7 +2,7 @@ use gyrase_jobs::Error;
 
 use crate::labels::file_name;
 
-pub fn text(error: &Error) -> String {
+pub(crate) fn text(error: &Error) -> String {
 	match error {
 		Error::Open { path, .. } => format!("Couldn't open {}.", file_name(path)),
 		Error::Write { path, .. } => format!("Couldn't save {}.", file_name(path)),

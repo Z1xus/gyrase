@@ -6,18 +6,18 @@ use gyrase_jobs::{Cancel, Error, Report};
 use crate::message;
 use crate::prepared::Prepared;
 
-pub struct Finished {
-	pub prepared: Prepared,
-	pub report: Report,
+pub(crate) struct Finished {
+	pub(crate) prepared: Prepared,
+	pub(crate) report: Report,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Exit {
+pub(crate) enum Exit {
 	Stay,
 	Quit,
 }
 
-pub enum Screen {
+pub(crate) enum Screen {
 	Pick(Option<String>),
 	Ready(Prepared),
 	Running(Prepared, Cancel),
@@ -33,7 +33,7 @@ impl Default for Screen {
 }
 
 impl Screen {
-	pub fn open(self, paths: &[PathBuf]) -> Self {
+	pub(crate) fn open(self, paths: &[PathBuf]) -> Self {
 		match self {
 			Self::Running(..) | Self::Stopping(..) => self,
 			Self::Ready(prepared) | Self::Failed(prepared, _) => match Prepared::open(paths) {
@@ -47,25 +47,25 @@ impl Screen {
 		}
 	}
 
-	pub fn clear(self) -> Self {
+	pub(crate) fn clear(self) -> Self {
 		match self {
 			Self::Running(..) | Self::Stopping(..) => self,
 			Self::Pick(_) | Self::Ready(_) | Self::Done(_) | Self::Failed(..) => Self::default(),
 		}
 	}
 
-	pub fn toggle(self, index: usize) -> Self {
+	pub(crate) fn toggle(self, index: usize) -> Self {
 		let Some(&format) = Format::ALL.get(index) else {
 			return self;
 		};
 		self.revise(|prepared| prepared.with(prepared.toggled(format), prepared.output.clone()))
 	}
 
-	pub fn relocate(self, folder: PathBuf) -> Self {
+	pub(crate) fn relocate(self, folder: PathBuf) -> Self {
 		self.revise(|prepared| prepared.with(prepared.formats.clone(), folder))
 	}
 
-	pub fn start(self, launch: impl FnOnce(&Prepared) -> Cancel) -> Self {
+	pub(crate) fn start(self, launch: impl FnOnce(&Prepared) -> Cancel) -> Self {
 		match self {
 			Self::Ready(prepared) | Self::Failed(prepared, _) => {
 				let cancel = launch(&prepared);
@@ -75,15 +75,15 @@ impl Screen {
 		}
 	}
 
-	pub fn cancel(self) -> Self {
+	pub(crate) fn cancel(self) -> Self {
 		self.stop(Exit::Stay)
 	}
 
-	pub fn close(self) -> Self {
+	pub(crate) fn close(self) -> Self {
 		self.stop(Exit::Quit)
 	}
 
-	pub fn exit(&self) -> Exit {
+	pub(crate) fn exit(&self) -> Exit {
 		match self {
 			Self::Stopping(_, exit) => *exit,
 			_ => Exit::Stay,
@@ -101,7 +101,7 @@ impl Screen {
 		}
 	}
 
-	pub fn finish(self, outcome: Result<Report, Error>) -> Self {
+	pub(crate) fn finish(self, outcome: Result<Report, Error>) -> Self {
 		match self {
 			Self::Running(prepared, _) | Self::Stopping(prepared, _) => match outcome {
 				Ok(report) => Self::Done(Finished { prepared, report }),

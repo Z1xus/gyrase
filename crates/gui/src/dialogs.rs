@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-pub fn files() -> Option<Vec<PathBuf>> {
+pub(crate) fn files() -> Option<Vec<PathBuf>> {
 	rfd::FileDialog::new()
 		.add_filter(
 			"DNA files",
@@ -11,6 +11,6 @@ pub fn files() -> Option<Vec<PathBuf>> {
 		.pick_files()
 }
 
-pub fn folder() -> Option<PathBuf> {
+pub(crate) fn folder() -> Option<PathBuf> {
 	rfd::FileDialog::new().pick_folder()
 }

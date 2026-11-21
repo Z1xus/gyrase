@@ -7,7 +7,7 @@ use crate::{Session, show};
 
 const FULL: u64 = 1000;
 
-pub fn spawn(session: &Session, prepared: &Prepared) -> Cancel {
+pub(crate) fn spawn(session: &Session, prepared: &Prepared) -> Cancel {
 	let cancel = Cancel::default();
 	let session = session.clone();
 	let plan = prepared.plan.clone();
