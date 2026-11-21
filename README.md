@@ -100,6 +100,21 @@ What gyrase does:
 - gyrase skips a position quickly when no alternate base has enough base-quality support. It does not calculate genotype likelihoods for most hom-ref positions.
 - Separate I/O threads decompress and compress BGZF blocks with [<img src="https://github.com/ebiggers.png?size=32" width="16" height="16" align="absmiddle"> libdeflate](https://github.com/ebiggers/libdeflate), so decompression does not stop the caller threads.
 
+## Aligner (synapton)
+
+gyrase uses its own short-read DNA aligner, `synapton`, written in safe Rust. The gyrase app is GPL-3.0-or-later, but `synapton` and its supporting crates are dual-licensed under MIT or Apache-2.0, at your option. You can use `synapton` in your own projects under either license.
+
+Benchmark conditions: 2,500,000 paired-end reads (5,000,000 reads, 151 bp) from HG002 NovaSeq PCR-free 35x on GRCh38 chromosome 20 only, prebuilt index, full SAM output to disk, 12 threads, AMD Ryzen 5 7600X (6 cores, 12 threads). Faster of two runs per tool. Agreement is the share of reads placed within 10 bp of the original HG002 bwa-mem BAM inside GIAB v4.2.1 high-confidence regions where the original MAPQ is at least 20.
+
+| Aligner | Wall time (chr20) | Speed (chr20) | Peak RSS (chr20) | Agreement in GIAB BED (chr20) |
+| --- | --- | --- | --- | --- |
+| synapton | 15.97 s | 313,087 reads/s | 315 MiB | 99.950% |
+| strobealign 0.20.0 | 17.29 s | 289,184 reads/s | 595 MiB | 99.858% |
+| minimap2 2.31 | 53.78 s | 92,971 reads/s | 962 MiB | 99.499% |
+| bwa-mem2 2.2.1 | 85.67 s | 58,363 reads/s | 3,788 MiB | 99.995% |
+
+These numbers are for chromosome 20 only. On this chromosome 20 test, `synapton` is faster and uses less memory than `strobealign`, `minimap2` and `bwa-mem2`. `bwa-mem2` has higher placement agreement with the original bwa-mem BAM (99.995% vs 99.950% in GIAB high-confidence regions), and all three baseline tools have fewer discordant high-MAPQ reads outside GIAB high-confidence regions (0.180% for `synapton` vs 0.158% for `strobealign`, 0.077% for `minimap2` and 0.023% for `bwa-mem2`).
+
 ## Build from source
 
 You need [<img src="https://cdn.simpleicons.org/rust/000000/ffffff" width="16" height="16" align="absmiddle"> Rust](https://rustup.rs) 1.99 or newer.
@@ -119,3 +134,9 @@ cargo build --workspace --release --locked
 ```
 
 The build creates `target/release/gyrase` and `target/release/gyr` (with .exe on Windows).
+
+## License
+
+The gyrase app, the gyr command-line tool and most workspace crates are licensed under GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+The aligner crate `synapton` and its supporting crates (`gyrase-genome`, `gyrase-io`, `gyrase-index` and `gyrase-reads`) are dual-licensed under MIT or Apache-2.0, at your option. See `LICENSE-MIT` and `LICENSE-APACHE` in each crate directory.
