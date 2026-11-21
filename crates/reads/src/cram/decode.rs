@@ -794,7 +794,7 @@ pub(crate) fn advance(position: u64, count: usize) -> Result<u64, Error> {
 		.ok_or(Error::IntegerOverflow)
 }
 
-fn reference_span(cigar: &[u32]) -> u64 {
+pub(crate) fn reference_span(cigar: &[u32]) -> u64 {
 	cigar
 		.iter()
 		.filter(|op| matches!(*op & 0xf, 0 | 2 | 3 | 7 | 8))

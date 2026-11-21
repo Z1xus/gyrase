@@ -1,5 +1,5 @@
 use crate::cram::Error;
-use crate::cram::decode::Environment;
+use crate::cram::decode::{Environment, reference_span};
 use crate::cram::records::{
 	FLAG_FIRST, FLAG_MATE_REVERSE, FLAG_MATE_UNMAPPED, FLAG_PAIRED, FLAG_REVERSE, FLAG_UNMAPPED,
 	MATE_REVERSE, MATE_UNMAPPED, Rec, Records, Span,
@@ -247,6 +247,23 @@ fn name_records(
 	Ok(())
 }
 
+fn long_placeholder(length: usize, cigar: &[u32]) -> Result<[u32; 2], Error> {
+	let op = |len: u64, kind: u32| {
+		u32::try_from(len)
+			.ok()
+			.filter(|len| len >> 28 == 0)
+			.map(|len| len << 4 | kind)
+			.ok_or(Error::IntegerOverflow)
+	};
+	Ok([
+		op(
+			u64::try_from(length).map_err(|_| Error::IntegerOverflow)?,
+			4,
+		)?,
+		op(reference_span(cigar), 3)?,
+	])
+}
+
 const fn nibble_table() -> [u8; 256] {
 	let mut table = [15u8; 256];
 	let mut code = 0u8;
@@ -299,7 +316,15 @@ fn write(records: &Records, environment: &Environment) -> Result<Decoded, Error>
 		bytes.push(rec.mapq);
 		let bin = region_bin(i64::from(rec.position) - 1, i64::from(rec.end));
 		bytes.extend_from_slice(&bin.to_le_bytes());
-		let operations = u16::try_from(cigar.len()).map_err(|_| Error::IntegerOverflow)?;
+		let long = u16::try_from(cigar.len()).is_err();
+		let placeholder;
+		let stored = if long {
+			placeholder = long_placeholder(rec.length, cigar)?;
+			&placeholder[..]
+		} else {
+			cigar
+		};
+		let operations = u16::try_from(stored.len()).map_err(|_| Error::IntegerOverflow)?;
 		bytes.extend_from_slice(&operations.to_le_bytes());
 		bytes.extend_from_slice(&rec.flags.to_le_bytes());
 		let length = u32::try_from(rec.length).map_err(|_| Error::IntegerOverflow)?;
@@ -314,7 +339,7 @@ fn write(records: &Records, environment: &Environment) -> Result<Decoded, Error>
 		bytes.extend_from_slice(&rec.template_length.unwrap_or(0).to_le_bytes());
 		bytes.extend_from_slice(name);
 		bytes.push(0);
-		for op in cigar {
+		for op in stored {
 			bytes.extend_from_slice(&op.to_le_bytes());
 		}
 		let bases = rec.bases.of(&records.bases);
@@ -337,6 +362,14 @@ fn write(records: &Records, environment: &Environment) -> Result<Decoded, Error>
 			bytes.extend_from_slice(b"RGZ");
 			bytes.extend_from_slice(group);
 			bytes.push(0);
+		}
+		if long {
+			bytes.extend_from_slice(b"CGBI");
+			let count = u32::try_from(cigar.len()).map_err(|_| Error::IntegerOverflow)?;
+			bytes.extend_from_slice(&count.to_le_bytes());
+			for op in cigar {
+				bytes.extend_from_slice(&op.to_le_bytes());
+			}
 		}
 		out.ends.push(bytes.len());
 	}
