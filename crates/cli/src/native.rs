@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use gyrase_extract::{Format, Sex, SexCall};
 use gyrase_jobs::{
-	Cancel, Input, Plan, Progress, Report, Request, Resources, Stage, Store, samples,
+	Cancel, Input, Plan, Progress, Report, Request, Resources, Source, Stage, Store, samples,
 };
 use lexopt::prelude::*;
 
@@ -154,11 +154,15 @@ fn summarize(plan: &Plan, report: &Report) -> Result<(), Failure> {
 		SexCall::Undetermined => "",
 	};
 	writeln!(out, "{}  {}{sex}", plan.sample.name, plan.build.name())?;
+	let prepared = match plan.sample.source {
+		Source::Reads(_) => "aligned",
+		_ => "sorted",
+	};
 	let rows = plan
 		.outputs
 		.alignments
 		.iter()
-		.map(|path| (path, String::from("sorted")))
+		.map(|path| (path, String::from(prepared)))
 		.chain(
 			plan.outputs
 				.variants
@@ -193,7 +197,7 @@ fn summarize(plan: &Plan, report: &Report) -> Result<(), Failure> {
 
 fn stage(stage: Stage) -> &'static str {
 	match stage {
-		Stage::Reference => "Downloading reference",
+		Stage::Reference => "Preparing reference",
 		Stage::Index => "Indexing",
 		Stage::Align => "Aligning",
 		Stage::Sort => "Sorting",
