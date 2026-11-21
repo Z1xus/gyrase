@@ -1,0 +1,25 @@
+mod binning;
+mod builder;
+mod chunk;
+mod crai;
+mod decode;
+mod encode;
+mod error;
+mod finalize;
+mod index;
+mod order;
+mod plan;
+mod query;
+mod reference;
+mod tabix;
+mod wire;
+
+pub use binning::Geometry;
+pub use builder::{Builder, Entry, Placement};
+pub use chunk::Chunk;
+pub use crai::{Crai, CraiEntry, CraiReference};
+pub use error::Error;
+pub use index::{Format, Index};
+pub use plan::{DEFAULT_MAX_GAP, Plan};
+pub use reference::{Bin, Metadata, RefIndex};
+pub use tabix::TabixHeader;
