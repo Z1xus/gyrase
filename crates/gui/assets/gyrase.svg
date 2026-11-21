@@ -1,22 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <defs>
-    <linearGradient id="gel" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2aa795" />
-      <stop offset="1" stop-color="#10695c" />
-    </linearGradient>
-  </defs>
-  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#gel)" />
-  <g transform="translate(48 48) scale(6.6667)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="m10 16 1.5 1.5" />
-    <path d="m14 8-1.5-1.5" />
-    <path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993" />
-    <path d="m16.5 10.5 1 1" />
-    <path d="m17 6-2.891-2.891" />
-    <path d="M2 15c6.667-6 13.333 0 20-6" />
-    <path d="m20 9 .891.891" />
-    <path d="M3.109 14.109 4 15" />
-    <path d="m6.5 12.5 1 1" />
-    <path d="m7 18 2.891 2.891" />
-    <path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993" />
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><defs>
+<radialGradient id="bg" cx=".5" cy=".28" r=".85"><stop offset="0" stop-color="#4fd3bf"/><stop offset=".55" stop-color="#1b9483"/><stop offset="1" stop-color="#0c5a4f"/></radialGradient>
+<linearGradient id="strand" gradientUnits="userSpaceOnUse" x1="0" y1="40" x2="0" y2="250"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d9f7f2"/></linearGradient>
+<linearGradient id="strand2" gradientUnits="userSpaceOnUse" x1="0" y1="140" x2="0" y2="250"><stop offset="0" stop-color="#d4fbf4"/><stop offset="1" stop-color="#8fe6d8"/></linearGradient>
+<linearGradient id="spec" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<filter id="inner" x="0" y="0" width="1" height="1"><feFlood flood-color="#063d35" flood-opacity=".7"/><feComposite in2="SourceAlpha" operator="out"/><feGaussianBlur stdDeviation="10"/><feOffset dy="-6"/><feComposite in2="SourceAlpha" operator="in"/><feMerge><feMergeNode in="SourceGraphic"/><feMergeNode/></feMerge></filter>
+<filter id="soft" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
+<filter id="lift" filterUnits="userSpaceOnUse" x="0" y="0" width="256" height="256"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#03302a" flood-opacity=".45"/></filter></defs><rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)" filter="url(#inner)"/><g transform="translate(128 130) scale(.8) translate(-121 -148)"><path d="M160 196 C160 238 96 240 90 210 C85.4 185.5 111.4 169.2 158.0 166.5" fill="none" stroke="url(#strand)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" filter="url(#lift)"/><path d="M120 60 A40 40 0 1 0 120.01 60" fill="none" stroke="url(#strand)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" filter="url(#lift)"/><path d="M160 60 V196" fill="none" stroke="url(#strand)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" filter="url(#lift)"/></g><ellipse cx="128" cy="40" rx="92" ry="26" fill="url(#spec)" filter="url(#soft)"/></svg>
