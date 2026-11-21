@@ -256,18 +256,22 @@ impl Caller {
 	) -> Option<Call> {
 		let column = pileup.column(site.position)?;
 		let reference = Base::from_ascii(*site.reference.first()?);
+		reference.index()?;
 		if reference != column.reference {
 			return None;
 		}
-		let alleles: Vec<Base> = std::iter::once(reference)
-			.chain(
-				site.alternates
-					.iter()
-					.filter_map(|alternate| alternate.first().map(|&base| Base::from_ascii(base))),
-			)
-			.filter(|base| base.index().is_some())
-			.take(MAX_ALLELES)
-			.collect();
+		let mut alleles = vec![reference];
+		for base in site
+			.alternates
+			.iter()
+			.filter_map(|alternate| alternate.first().map(|&base| Base::from_ascii(base)))
+			.chain(snp::alleles(&column, &self.model).unwrap_or_default())
+			.chain(Base::ACGT)
+		{
+			if alleles.len() < MAX_ALLELES && base.index().is_some() && !alleles.contains(&base) {
+				alleles.push(base);
+			}
+		}
 		let (evidence, support) = self.snp_evidence(pileup, candidates, &column, &alleles);
 		let scored = self.score_evidence(alleles.len(), &evidence, &Priors::Flat);
 		let mut call = snp_call(&column, &alleles, &evidence, support, &scored);
