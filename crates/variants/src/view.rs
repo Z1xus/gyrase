@@ -9,6 +9,7 @@ use crate::par::ordered;
 use crate::read::{LineBatch, Reader, RecordBatch};
 use crate::record::{CountKeys, Record};
 use crate::region::Regions;
+use crate::remap::Remap;
 use crate::site::Site;
 use crate::vcf::VcfLine;
 use crate::write::{Encoded, Format, Formatter, Placed, Sink, Span, Writer};
@@ -81,6 +82,7 @@ pub struct View {
 	fidelity: Fidelity,
 	format: Format,
 	input_header: Header,
+	remap: Remap,
 	counts: Option<CountKeys>,
 }
 
@@ -126,6 +128,7 @@ impl View {
 				Some(Compiled::Exclude(Filter::compile(text, input)?))
 			}
 		};
+		let remap = Remap::new(input, &header)?;
 		Ok(Self {
 			header,
 			keep,
@@ -134,6 +137,7 @@ impl View {
 			fidelity: options.fidelity,
 			format: options.format,
 			input_header: input.clone(),
+			remap,
 			counts,
 		})
 	}
@@ -178,6 +182,7 @@ impl View {
 	}
 
 	fn finish_record(&self, out: &mut ViewOutput) -> Result<(), Error> {
+		self.remap.apply(&mut out.record)?;
 		let all_dropped = self.keep.as_ref().is_some_and(Vec::is_empty);
 		if let Some(keep) = &self.keep
 			&& !all_dropped
@@ -221,9 +226,12 @@ impl View {
 				start: source.start()?,
 				end: source.end(&self.input_header)?,
 			};
-			return out
-				.formatter
-				.push_bcf(source.shared(), source.indiv(), span, &mut out.encoded);
+			return out.formatter.push_bcf(
+				source.shared(),
+				source.sample_block(),
+				span,
+				&mut out.encoded,
+			);
 		}
 		if self.verbatim() && self.format == Format::Vcf {
 			let span = Span {

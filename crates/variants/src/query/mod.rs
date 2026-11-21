@@ -84,7 +84,7 @@ pub struct QueryOutput {
 
 impl Query {
 	pub fn new(header: &Header, format: &str, options: QueryOptions) -> Result<Self, Error> {
-		let mut samples: Vec<usize> = match &options.samples {
+		let samples: Vec<usize> = match &options.samples {
 			None => (0..header.sample_count()).collect(),
 			Some(names) => names
 				.iter()
@@ -95,8 +95,6 @@ impl Query {
 				})
 				.collect::<Result<_, _>>()?,
 		};
-		samples.sort_unstable();
-		samples.dedup();
 		let condition = match &options.condition {
 			None => None,
 			Some(Condition::Include(text)) => {

@@ -5,11 +5,11 @@ use crate::header::Header;
 use crate::number::{push_float, push_int};
 use crate::value::{BcfType, is_missing_float};
 use crate::vcf::{
-	push_float_list, push_int_list, push_or_dot, push_text, tag_name, write_genotype,
+	push_float_list, push_int_list, push_or_dot, push_sample_text, push_text, tag_name,
+	write_genotype,
 };
 
 const GENOTYPE_KEY: &str = "GT";
-const MISSING_STRING_BYTE: u8 = 7;
 
 impl BcfRecord<'_> {
 	pub fn write_vcf(&self, header: &Header, out: &mut Vec<u8>) -> Result<(), Error> {
@@ -55,7 +55,7 @@ impl BcfRecord<'_> {
 
 	fn write_filters(&self, header: &Header, out: &mut Vec<u8>) -> Result<(), Error> {
 		let filters = self.filters()?;
-		if matches!(filters.ty, BcfType::Null) || filters.len == 0 {
+		if matches!(filters.bcf_type, BcfType::Null) || filters.len == 0 {
 			out.push(b'.');
 			return Ok(());
 		}
@@ -80,7 +80,7 @@ impl BcfRecord<'_> {
 				out.push(b';');
 			}
 			out.extend_from_slice(tag_name(header, entry.key)?.as_bytes());
-			if entry.value.len == 0 || matches!(entry.value.ty, BcfType::Null) {
+			if entry.value.len == 0 || matches!(entry.value.bcf_type, BcfType::Null) {
 				continue;
 			}
 			out.push(b'=');
@@ -101,7 +101,7 @@ impl BcfRecord<'_> {
 		let mut fields: Vec<(FormatEntry<'_>, bool)> = Vec::with_capacity(self.format_count());
 		for entry in self.format() {
 			let entry = entry?;
-			if matches!(entry.values.ty, BcfType::Null) {
+			if matches!(entry.values.bcf_type, BcfType::Null) {
 				return Err(Error::Bcf("FORMAT field without a type"));
 			}
 			let genotype = header.name(entry.key) == Some(GENOTYPE_KEY);
@@ -123,7 +123,7 @@ impl BcfRecord<'_> {
 }
 
 fn push_typed(out: &mut Vec<u8>, value: &Typed<'_>) {
-	match value.ty {
+	match value.bcf_type {
 		BcfType::Null => {}
 		BcfType::Int8 | BcfType::Int16 | BcfType::Int32 => push_int_list(out, value.ints()),
 		BcfType::Float => push_float_list(out, value.floats()),
@@ -138,7 +138,7 @@ fn write_sample_field(
 	sample: usize,
 	out: &mut Vec<u8>,
 ) -> Result<(), Error> {
-	let width = entry.values.ty.width();
+	let width = entry.values.bcf_type.width();
 	let step = entry
 		.values
 		.len
@@ -153,22 +153,15 @@ fn write_sample_field(
 		.get(start..start + step)
 		.ok_or(Error::Bcf("FORMAT field is truncated"))?;
 	let values = Typed {
-		ty: entry.values.ty,
+		bcf_type: entry.values.bcf_type,
 		len: entry.values.len,
 		bytes,
 	};
-	match values.ty {
+	match values.bcf_type {
 		BcfType::Int8 | BcfType::Int16 | BcfType::Int32 if genotype => {
 			write_genotype(out, values.ints(), header.version());
 		}
-		BcfType::Char => match values.text() {
-			[byte] => out.push(if *byte == MISSING_STRING_BYTE {
-				b'.'
-			} else {
-				*byte
-			}),
-			text => push_text(out, text),
-		},
+		BcfType::Char => push_sample_text(out, values.text()),
 		_ => push_typed(out, &values),
 	}
 	Ok(())

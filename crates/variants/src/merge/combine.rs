@@ -197,36 +197,34 @@ fn gather<T: Numeric>(
 	Ok(())
 }
 
-fn sum_floats(sum: &mut Sum) -> Vec<f32> {
-	for value in &mut sum.floats {
-		if value.is_missing() {
-			*value = 0.0;
-		}
-	}
-	let mut blocks = sum.floats.chunks_exact(sum.width);
-	let mut total = blocks.next().unwrap_or_default().to_vec();
-	for block in blocks {
-		for (total, value) in total.iter_mut().zip(block) {
-			*total += value;
-		}
-	}
-	total
+fn sum_floats(sum: &Sum) -> Vec<f32> {
+	(0..sum.width)
+		.map(|column| {
+			sum.floats
+				.iter()
+				.skip(column)
+				.step_by(sum.width)
+				.copied()
+				.filter(|value| !value.is_missing())
+				.reduce(|total, value| total + value)
+				.unwrap_or(0.0)
+		})
+		.collect()
 }
 
-fn sum_ints(sum: &mut Sum) -> Vec<i32> {
-	for value in &mut sum.ints {
-		if value.is_missing() {
-			*value = 0;
-		}
-	}
-	let mut blocks = sum.ints.chunks_exact(sum.width);
-	let mut total = blocks.next().unwrap_or_default().to_vec();
-	for block in blocks {
-		for (total, value) in total.iter_mut().zip(block) {
-			*total = total.wrapping_add(*value);
-		}
-	}
-	total
+fn sum_ints(sum: &Sum) -> Vec<i32> {
+	(0..sum.width)
+		.map(|column| {
+			sum.ints
+				.iter()
+				.skip(column)
+				.step_by(sum.width)
+				.copied()
+				.filter(|value| !value.is_missing())
+				.reduce(i32::saturating_add)
+				.unwrap_or(0)
+		})
+		.collect()
 }
 
 fn records<'a>(taken: &'a [Taken], group: &Group) -> Result<Vec<&'a Record>, Error> {
@@ -405,15 +403,15 @@ impl Combiner {
 				if merge.skipped.contains(&field.key) {
 					continue;
 				}
-				if let Some(index) = merge.rules.iter().position(|rule| rule.key == field.key) {
-					self.add_sum(index, record, field)?;
-					continue;
-				}
 				let number = merge
 					.header
 					.info_def(field.key)
 					.map_or(Number::Variable, |definition| definition.number);
 				let size = spread_size(number, alleles);
+				if let Some(index) = merge.rules.iter().position(|rule| rule.key == field.key) {
+					self.add_sum(index, record, field, (number, &member.map, size))?;
+					continue;
+				}
 				if size > 0 {
 					self.add_spread(record, field, size, number, &member.map)?;
 				} else if !self.seen.contains(&field.key) {
@@ -427,18 +425,47 @@ impl Combiner {
 		Ok(())
 	}
 
-	fn add_sum(&mut self, index: usize, record: &Record, field: &Field) -> Result<(), Error> {
+	fn add_sum(
+		&mut self,
+		index: usize,
+		record: &Record,
+		field: &Field,
+		(number, map, size): (Number, &[usize], usize),
+	) -> Result<(), Error> {
 		let sum = self.sums.get_mut(index).ok_or(Error::Limits("rules"))?;
+		slots(number, map, &mut self.slots);
 		let width = match &field.cells {
 			Cells::Ints(_) => {
 				let values = live(record.store.ints(&field.cells));
-				sum.ints.extend_from_slice(values);
-				values.len()
+				if size == 0 {
+					sum.ints.extend_from_slice(values);
+					values.len()
+				} else {
+					let start = sum.ints.len();
+					sum.ints.resize(start + size, MISSING_INT);
+					scatter(
+						sum.ints.get_mut(start..).unwrap_or_default(),
+						values,
+						&self.slots,
+					);
+					size
+				}
 			}
 			Cells::Floats(_) => {
 				let values = live(record.store.floats(&field.cells));
-				sum.floats.extend_from_slice(values);
-				values.len()
+				if size == 0 {
+					sum.floats.extend_from_slice(values);
+					values.len()
+				} else {
+					let start = sum.floats.len();
+					sum.floats.resize(start + size, f32::MISSING);
+					scatter(
+						sum.floats.get_mut(start..).unwrap_or_default(),
+						values,
+						&self.slots,
+					);
+					size
+				}
 			}
 			Cells::Flag | Cells::Text(_) => return Err(Error::Incompatible("INFO type")),
 		};
@@ -451,7 +478,7 @@ impl Combiner {
 	}
 
 	fn finish_sums(&mut self, merge: &Merge, out: &mut Record) {
-		for (rule, sum) in merge.rules.iter().zip(&mut self.sums) {
+		for (rule, sum) in merge.rules.iter().zip(&self.sums) {
 			if sum.blocks == 0 || sum.width == 0 {
 				continue;
 			}

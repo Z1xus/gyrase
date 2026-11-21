@@ -41,14 +41,16 @@ impl RecordBatch {
 
 	pub fn records(&self) -> impl Iterator<Item = Result<BcfRecord<'_>, Error>> {
 		let mut start = 0;
-		self.parts.iter().map(move |&(shared_len, indiv_len)| {
-			let shared_end = start + shared_len;
-			let indiv_end = shared_end + indiv_len;
-			let shared = self.bytes.get(start..shared_end).unwrap_or_default();
-			let indiv = self.bytes.get(shared_end..indiv_end).unwrap_or_default();
-			start = indiv_end;
-			BcfRecord::new(shared, indiv)
-		})
+		self.parts
+			.iter()
+			.map(move |&(shared_len, sample_block_len)| {
+				let shared_end = start + shared_len;
+				let indiv_end = shared_end + sample_block_len;
+				let shared = self.bytes.get(start..shared_end).unwrap_or_default();
+				let sample_block = self.bytes.get(shared_end..indiv_end).unwrap_or_default();
+				start = indiv_end;
+				BcfRecord::new(shared, sample_block)
+			})
 	}
 }
 
@@ -91,8 +93,8 @@ impl<R: BufRead> BcfReader<R> {
 		let Some((shared_len, _)) = read_record(&mut self.source, &mut self.scratch)? else {
 			return Ok(None);
 		};
-		let (shared, indiv) = self.scratch.split_at(shared_len);
-		BcfRecord::new(shared, indiv).map(Some)
+		let (shared, sample_block) = self.scratch.split_at(shared_len);
+		BcfRecord::new(shared, sample_block).map(Some)
 	}
 
 	pub fn read_batch(&mut self, batch: &mut RecordBatch, limit: usize) -> Result<bool, Error> {
@@ -114,11 +116,11 @@ pub(crate) fn read_record(
 	let Some(shared_len) = read_length(source)? else {
 		return Ok(None);
 	};
-	let indiv_len = read_length(source)?.ok_or(Error::Bcf("record is truncated"))?;
+	let sample_block_len = read_length(source)?.ok_or(Error::Bcf("record is truncated"))?;
 	let shared_len = shared_len as usize;
-	let indiv_len = indiv_len as usize;
+	let sample_block_len = sample_block_len as usize;
 	let start = out.len();
-	out.resize(start + shared_len + indiv_len, 0);
+	out.resize(start + shared_len + sample_block_len, 0);
 	let body = out
 		.get_mut(start..)
 		.ok_or(Error::Bcf("record is truncated"))?;
@@ -129,7 +131,7 @@ pub(crate) fn read_record(
 			Error::Io(error)
 		}
 	})?;
-	Ok(Some((shared_len, indiv_len)))
+	Ok(Some((shared_len, sample_block_len)))
 }
 
 fn read_length(source: &mut impl BufRead) -> Result<Option<u32>, Error> {

@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use super::node::Select;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum Shape {
 	#[default]
@@ -11,6 +13,7 @@ pub(super) enum Shape {
 pub(super) struct Value {
 	pub shape: Shape,
 	pub width: usize,
+	pub selected: Select,
 	pub numbers: Vec<f64>,
 	pub bytes: Vec<u8>,
 	pub ends: Vec<usize>,
@@ -21,6 +24,7 @@ impl Value {
 	pub fn reset(&mut self, shape: Shape) {
 		self.shape = shape;
 		self.width = 1;
+		self.selected = Select::All;
 		self.numbers.clear();
 		self.bytes.clear();
 		self.ends.clear();
@@ -30,6 +34,10 @@ impl Value {
 	pub fn push_text(&mut self, text: &[u8]) {
 		self.bytes.extend_from_slice(text);
 		self.ends.push(self.bytes.len());
+	}
+
+	pub fn is_selected(&self, sample: usize) -> bool {
+		self.shape == Shape::Site || self.selected.contains(sample)
 	}
 
 	pub fn sample_count(&self) -> usize {

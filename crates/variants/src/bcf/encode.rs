@@ -12,7 +12,7 @@ const INT16_MIN: i32 = -32760;
 #[derive(Debug, Default)]
 pub struct Encoder {
 	shared: Vec<u8>,
-	indiv: Vec<u8>,
+	sample_block: Vec<u8>,
 }
 
 impl Encoder {
@@ -22,7 +22,7 @@ impl Encoder {
 
 	pub fn encode(&mut self, record: &Record, header: &Header) -> Result<(&[u8], &[u8]), Error> {
 		self.shared.clear();
-		self.indiv.clear();
+		self.sample_block.clear();
 		record.check(header)?;
 		let alleles = u16::try_from(record.allele_count()).map_err(|_| Error::Limits("alleles"))?;
 		let info = u16::try_from(record.info.len()).map_err(|_| Error::Limits("INFO fields"))?;
@@ -71,10 +71,10 @@ impl Encoder {
 			push_info_value(shared, record, field);
 		}
 		for field in &record.format {
-			push_int1(&mut self.indiv, field.key.cast_signed());
-			push_format_values(&mut self.indiv, record, field)?;
+			push_int1(&mut self.sample_block, field.key.cast_signed());
+			push_format_values(&mut self.sample_block, record, field)?;
 		}
-		Ok((&self.shared, &self.indiv))
+		Ok((&self.shared, &self.sample_block))
 	}
 }
 
@@ -113,12 +113,12 @@ fn push_float_values(out: &mut Vec<u8>, values: &[f32]) {
 	}
 }
 
-pub(crate) fn push_size(out: &mut Vec<u8>, size: usize, ty: BcfType) {
+pub(crate) fn push_size(out: &mut Vec<u8>, size: usize, bcf_type: BcfType) {
 	if size < usize::from(LONG_LENGTH) {
-		out.push(u8::try_from(size).unwrap_or(0) << 4 | ty.code());
+		out.push(u8::try_from(size).unwrap_or(0) << 4 | bcf_type.code());
 		return;
 	}
-	out.push(LONG_LENGTH << 4 | ty.code());
+	out.push(LONG_LENGTH << 4 | bcf_type.code());
 	push_int1(out, i32::try_from(size).unwrap_or(i32::MAX));
 }
 

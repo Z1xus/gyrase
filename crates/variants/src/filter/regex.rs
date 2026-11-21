@@ -26,8 +26,23 @@ enum Node {
 }
 
 #[derive(Debug, Clone)]
+enum Instruction {
+	Byte(u8),
+	Any,
+	Class {
+		ranges: Vec<(u8, u8)>,
+		negated: bool,
+	},
+	Start,
+	End,
+	Split(usize, usize),
+	Jump(usize),
+	Match,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct Regex {
-	root: Node,
+	program: Vec<Instruction>,
 }
 
 struct Parser<'a> {
@@ -45,11 +60,14 @@ impl Regex {
 		if parser.at != parser.pattern.len() {
 			return Err(BAD_PATTERN);
 		}
-		Ok(Self { root })
+		let mut program = Vec::new();
+		compile(&root, &mut program);
+		program.push(Instruction::Match);
+		Ok(Self { program })
 	}
 
 	pub fn is_match(&self, text: &[u8]) -> bool {
-		(0..=text.len()).any(|start| matches(&self.root, text, start, &mut |_| true))
+		run(&self.program, text)
 	}
 }
 
@@ -155,56 +173,168 @@ impl Parser<'_> {
 	}
 }
 
-fn matches(node: &Node, text: &[u8], at: usize, next: &mut dyn FnMut(usize) -> bool) -> bool {
+fn emit(program: &mut Vec<Instruction>, instruction: Instruction) -> usize {
+	program.push(instruction);
+	program.len() - 1
+}
+
+fn patch(program: &mut [Instruction], at: usize, instruction: Instruction) {
+	if let Some(slot) = program.get_mut(at) {
+		*slot = instruction;
+	}
+}
+
+fn close(program: &mut [Instruction], split: usize) {
+	let target = program.len();
+	patch(program, split, Instruction::Split(split + 1, target));
+}
+
+fn compile(node: &Node, program: &mut Vec<Instruction>) {
 	match node {
-		Node::Byte(byte) => text.get(at) == Some(byte) && next(at + 1),
-		Node::Any => at < text.len() && next(at + 1),
-		Node::Class { ranges, negated } => text.get(at).is_some_and(|byte| {
-			let inside = ranges
-				.iter()
-				.any(|&(low, high)| low <= *byte && *byte <= high);
-			inside != *negated && next(at + 1)
-		}),
-		Node::Start => at == 0 && next(at),
-		Node::End => at == text.len() && next(at),
-		Node::Sequence(items) => sequence(items, text, at, next),
-		Node::Alternatives(branches) => branches
-			.iter()
-			.any(|branch| matches(branch, text, at, next)),
-		Node::Repeat { node, min, max } => repeat(node, *min, *max, text, at, next),
+		Node::Byte(byte) => {
+			emit(program, Instruction::Byte(*byte));
+		}
+		Node::Any => {
+			emit(program, Instruction::Any);
+		}
+		Node::Class { ranges, negated } => {
+			emit(
+				program,
+				Instruction::Class {
+					ranges: ranges.clone(),
+					negated: *negated,
+				},
+			);
+		}
+		Node::Start => {
+			emit(program, Instruction::Start);
+		}
+		Node::End => {
+			emit(program, Instruction::End);
+		}
+		Node::Sequence(items) => {
+			for item in items {
+				compile(item, program);
+			}
+		}
+		Node::Alternatives(branches) => {
+			let mut jumps = Vec::new();
+			for (index, branch) in branches.iter().enumerate() {
+				if index + 1 == branches.len() {
+					compile(branch, program);
+					break;
+				}
+				let split = emit(program, Instruction::Split(0, 0));
+				compile(branch, program);
+				jumps.push(emit(program, Instruction::Jump(0)));
+				close(program, split);
+			}
+			let end = program.len();
+			for jump in jumps {
+				patch(program, jump, Instruction::Jump(end));
+			}
+		}
+		Node::Repeat { node, min, max } => {
+			let start = program.len();
+			match (min, max) {
+				(0, None) => {
+					let split = emit(program, Instruction::Split(0, 0));
+					compile(node, program);
+					emit(program, Instruction::Jump(split));
+					close(program, split);
+				}
+				(0, Some(_)) => {
+					let split = emit(program, Instruction::Split(0, 0));
+					compile(node, program);
+					close(program, split);
+				}
+				_ => {
+					compile(node, program);
+					if max.is_none() {
+						emit(program, Instruction::Split(start, program.len() + 1));
+					}
+				}
+			}
+		}
 	}
 }
 
-fn sequence(items: &[Node], text: &[u8], at: usize, next: &mut dyn FnMut(usize) -> bool) -> bool {
-	match items.split_first() {
-		None => next(at),
-		Some((first, rest)) => matches(first, text, at, &mut |after| {
-			sequence(rest, text, after, next)
-		}),
-	}
-}
-
-fn repeat(
-	node: &Node,
-	min: usize,
-	max: Option<usize>,
-	text: &[u8],
-	at: usize,
-	next: &mut dyn FnMut(usize) -> bool,
+fn follow(
+	program: &[Instruction],
+	entry: usize,
+	position: usize,
+	length: usize,
+	marks: &mut [usize],
+	stamp: usize,
+	threads: &mut Vec<usize>,
 ) -> bool {
-	if max == Some(0) {
-		return next(at);
+	let mut stack = vec![entry];
+	while let Some(at) = stack.pop() {
+		let Some(mark) = marks.get_mut(at) else {
+			continue;
+		};
+		if *mark == stamp {
+			continue;
+		}
+		*mark = stamp;
+		match program.get(at) {
+			Some(Instruction::Jump(target)) => stack.push(*target),
+			Some(Instruction::Split(first, second)) => {
+				stack.push(*second);
+				stack.push(*first);
+			}
+			Some(Instruction::Start) if position == 0 => stack.push(at + 1),
+			Some(Instruction::End) if position == length => stack.push(at + 1),
+			Some(Instruction::Match) => return true,
+			Some(Instruction::Start | Instruction::End) | None => {}
+			Some(_) => threads.push(at),
+		}
 	}
-	let more = matches(node, text, at, &mut |after| {
-		after > at
-			&& repeat(
-				node,
-				min.saturating_sub(1),
-				max.map(|limit| limit - 1),
-				text,
-				after,
-				next,
-			)
-	});
-	more || (min == 0 && next(at))
+	false
+}
+
+fn consumes(instruction: &Instruction, byte: u8) -> bool {
+	match instruction {
+		Instruction::Byte(expected) => *expected == byte,
+		Instruction::Any => true,
+		Instruction::Class { ranges, negated } => {
+			ranges
+				.iter()
+				.any(|&(low, high)| low <= byte && byte <= high)
+				!= *negated
+		}
+		_ => false,
+	}
+}
+
+fn run(program: &[Instruction], text: &[u8]) -> bool {
+	let mut marks = vec![usize::MAX; program.len()];
+	let mut pending: Vec<usize> = Vec::new();
+	let mut threads: Vec<usize> = Vec::new();
+	for position in 0..=text.len() {
+		threads.clear();
+		for entry in pending.drain(..).chain(std::iter::once(0)) {
+			if follow(
+				program,
+				entry,
+				position,
+				text.len(),
+				&mut marks,
+				position,
+				&mut threads,
+			) {
+				return true;
+			}
+		}
+		let Some(&byte) = text.get(position) else {
+			break;
+		};
+		pending.extend(
+			threads
+				.iter()
+				.filter(|&&at| program.get(at).is_some_and(|step| consumes(step, byte)))
+				.map(|&at| at + 1),
+		);
+	}
+	false
 }

@@ -10,7 +10,7 @@ const FIXED_LEN: usize = 24;
 #[derive(Debug, Clone, Copy)]
 pub struct BcfRecord<'a> {
 	shared: &'a [u8],
-	indiv: &'a [u8],
+	sample_block: &'a [u8],
 	allele_count: usize,
 	info_count: usize,
 	format_count: usize,
@@ -34,7 +34,7 @@ pub struct FormatEntry<'a> {
 }
 
 impl<'a> BcfRecord<'a> {
-	pub fn new(shared: &'a [u8], indiv: &'a [u8]) -> Result<Self, Error> {
+	pub fn new(shared: &'a [u8], sample_block: &'a [u8]) -> Result<Self, Error> {
 		if shared.len() < FIXED_LEN {
 			return Err(Error::Bcf("shared part is shorter than the fixed fields"));
 		}
@@ -43,7 +43,7 @@ impl<'a> BcfRecord<'a> {
 		let allele_count = usize::from(u16::try_from(allele_info >> 16).unwrap_or(0));
 		let mut record = Self {
 			shared,
-			indiv,
+			sample_block,
 			allele_count,
 			info_count: usize::from(u16::try_from(allele_info & 0xffff).unwrap_or(0)),
 			format_count: usize::try_from(format_samples >> 24).unwrap_or(0),
@@ -105,8 +105,8 @@ impl<'a> BcfRecord<'a> {
 		self.shared
 	}
 
-	pub fn indiv(&self) -> &'a [u8] {
-		self.indiv
+	pub fn sample_block(&self) -> &'a [u8] {
+		self.sample_block
 	}
 
 	pub fn id(&self) -> Result<&'a [u8], Error> {
@@ -138,7 +138,7 @@ impl<'a> BcfRecord<'a> {
 	}
 
 	pub fn format(&self) -> impl Iterator<Item = Result<FormatEntry<'a>, Error>> {
-		let mut cursor = Cursor::new(self.indiv);
+		let mut cursor = Cursor::new(self.sample_block);
 		let samples = self.sample_count;
 		(0..self.format_count).map(move |_| {
 			let key = cursor

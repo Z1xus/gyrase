@@ -144,7 +144,7 @@ fn fill_genotype(
 	let start = out.len();
 	match item {
 		Some(item) => parse_genotype(item, out, version)?,
-		None => out.push(MISSING_INT),
+		None => out.push(0),
 	}
 	let written = out.len() - start;
 	for _ in written..width {

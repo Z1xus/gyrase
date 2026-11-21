@@ -87,8 +87,8 @@ impl Formatter {
 				out.bytes_mut().push(b'\n');
 			}
 			Format::Bcf => {
-				let (shared, indiv) = self.encoder.encode(record, header)?;
-				push_bcf_parts(out.bytes_mut(), shared, indiv)?;
+				let (shared, sample_block) = self.encoder.encode(record, header)?;
+				push_bcf_parts(out.bytes_mut(), shared, sample_block)?;
 			}
 		}
 		out.seal(Span {
@@ -121,22 +121,23 @@ impl Formatter {
 	pub fn push_bcf(
 		&self,
 		shared: &[u8],
-		indiv: &[u8],
+		sample_block: &[u8],
 		span: Span,
 		out: &mut Encoded,
 	) -> Result<(), Error> {
-		push_bcf_parts(out.bytes_mut(), shared, indiv)?;
+		push_bcf_parts(out.bytes_mut(), shared, sample_block)?;
 		out.seal(span);
 		Ok(())
 	}
 }
 
-fn push_bcf_parts(out: &mut Vec<u8>, shared: &[u8], indiv: &[u8]) -> Result<(), Error> {
+fn push_bcf_parts(out: &mut Vec<u8>, shared: &[u8], sample_block: &[u8]) -> Result<(), Error> {
 	let shared_len = u32::try_from(shared.len()).map_err(|_| Error::Limits("record length"))?;
-	let indiv_len = u32::try_from(indiv.len()).map_err(|_| Error::Limits("record length"))?;
+	let sample_block_len =
+		u32::try_from(sample_block.len()).map_err(|_| Error::Limits("record length"))?;
 	out.extend_from_slice(&shared_len.to_le_bytes());
-	out.extend_from_slice(&indiv_len.to_le_bytes());
+	out.extend_from_slice(&sample_block_len.to_le_bytes());
 	out.extend_from_slice(shared);
-	out.extend_from_slice(indiv);
+	out.extend_from_slice(sample_block);
 	Ok(())
 }

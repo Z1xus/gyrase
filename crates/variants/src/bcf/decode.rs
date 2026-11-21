@@ -14,7 +14,7 @@ impl Record {
 			self.push_allele(allele?);
 		}
 		let filters = source.filters()?;
-		if !matches!(filters.ty, BcfType::Null) {
+		if !matches!(filters.bcf_type, BcfType::Null) {
 			for key in filters.ints() {
 				self.filters
 					.push(u32::try_from(key).map_err(|_| Error::Bcf("negative FILTER key"))?);

@@ -144,9 +144,12 @@ impl ConcatInput<'_> {
 				start: source.start()?,
 				end: source.end(&self.concat.header)?,
 			};
-			return out
-				.formatter
-				.push_bcf(source.shared(), source.indiv(), span, &mut out.encoded);
+			return out.formatter.push_bcf(
+				source.shared(),
+				source.sample_block(),
+				span,
+				&mut out.encoded,
+			);
 		}
 		if self.verbatim(Format::Vcf) {
 			let span = Span {

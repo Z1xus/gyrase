@@ -61,11 +61,16 @@ impl Parser<'_> {
 		}
 	}
 
-	fn or(&mut self) -> Result<Node, Error> {
+	fn enter(&mut self) -> Result<(), Error> {
 		self.depth += 1;
 		if self.depth > MAX_DEPTH {
 			return Err(self.error("expression is nested too deeply"));
 		}
+		Ok(())
+	}
+
+	fn or(&mut self) -> Result<Node, Error> {
+		self.enter()?;
 		let mut left = self.and()?;
 		loop {
 			let operator = match self.peek() {
@@ -125,6 +130,14 @@ impl Parser<'_> {
 				node: Box::new(node),
 				negated,
 			}),
+			(Comparison::Equal | Comparison::NotEqual, node, Node::Text(text))
+				if text == b"." && node.kind() == Kind::Numbers =>
+			{
+				Ok(Node::IsMissing {
+					node: Box::new(node),
+					negated,
+				})
+			}
 			(
 				Comparison::Equal | Comparison::NotEqual,
 				Node::Format { key, samples, .. },
@@ -200,6 +213,13 @@ impl Parser<'_> {
 	}
 
 	fn unary(&mut self) -> Result<Node, Error> {
+		self.enter()?;
+		let node = self.prefixed()?;
+		self.depth -= 1;
+		Ok(node)
+	}
+
+	fn prefixed(&mut self) -> Result<Node, Error> {
 		if self.eat(&Token::Not) {
 			let node = self.unary()?;
 			if node.kind() != Kind::Truth {
@@ -264,6 +284,13 @@ impl Parser<'_> {
 	}
 
 	fn call(&mut self, word: &str) -> Result<Node, Error> {
+		self.enter()?;
+		let node = self.function(word)?;
+		self.depth -= 1;
+		Ok(node)
+	}
+
+	fn function(&mut self, word: &str) -> Result<Node, Error> {
 		let function = match word {
 			"MAX" => Function::Max,
 			"MIN" => Function::Min,

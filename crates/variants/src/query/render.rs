@@ -5,7 +5,7 @@ use crate::header::Header;
 use crate::number::{push_float, push_int};
 use crate::site::Site;
 use crate::value::{Cells, END_INT, Loaded, MISSING_INT, is_end_float, is_missing_float};
-use crate::vcf::{push_float_list, push_int_list, write_genotype, write_info};
+use crate::vcf::{push_float_list, push_int_list, push_sample_text, write_genotype, write_info};
 
 const MISSING: u8 = b'.';
 
@@ -77,8 +77,8 @@ fn emit<S: Site>(
 		Field::Alt(subscript) => alts(site, subscript, out)?,
 		Field::FirstAlt => alts(site, Some(0), out)?,
 		Field::Qual => match site.qual()? {
-			Some(qual) => push_float(&mut out.bytes, qual),
-			None => out.bytes.push(MISSING),
+			Some(qual) if !is_missing_float(qual) => push_float(&mut out.bytes, qual),
+			_ => out.bytes.push(MISSING),
 		},
 		Field::Filter => {
 			site.filters(header, &mut out.keys)?;
@@ -236,10 +236,12 @@ fn format(
 		}
 		Cells::Text(_) => {
 			let text = loaded.sample_text(sample);
-			let text = text.split(|&byte| byte == 0).next().unwrap_or_default();
 			match subscript {
-				Some(index) => comma_field(text, index, out),
-				None => out.extend_from_slice(text),
+				Some(index) => {
+					let text = text.split(|&byte| byte == 0).next().unwrap_or_default();
+					comma_field(text, index, out);
+				}
+				None => push_sample_text(out, text),
 			}
 		}
 	}

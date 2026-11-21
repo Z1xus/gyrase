@@ -35,7 +35,7 @@ impl Remap {
 			&& keys
 				.iter()
 				.zip(0u32..)
-				.all(|(&mapped, index)| mapped.is_none_or(|mapped| mapped == index));
+				.all(|(&mapped, index)| mapped == Some(index));
 		Ok(Self {
 			contigs,
 			keys,

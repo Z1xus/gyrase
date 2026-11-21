@@ -1,8 +1,9 @@
 use super::regex::Regex;
 use crate::value::ValueType;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum Select {
+	#[default]
 	All,
 	Range(usize, usize),
 }
@@ -12,6 +13,15 @@ impl Select {
 		match self {
 			Self::All => true,
 			Self::Range(first, last) => first <= index && index <= last,
+		}
+	}
+
+	pub(super) fn intersect(self, other: Self) -> Self {
+		match (self, other) {
+			(Self::All, other) | (other, Self::All) => other,
+			(Self::Range(first, last), Self::Range(other_first, other_last)) => {
+				Self::Range(first.max(other_first), last.min(other_last))
+			}
 		}
 	}
 }

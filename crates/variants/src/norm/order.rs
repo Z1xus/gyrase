@@ -60,7 +60,8 @@ impl Window {
 			.iter()
 			.take_while(|record| {
 				if front.contig == back.contig {
-					i64::from(back.start) - i64::from(record.start) >= self.span
+					record.start < back.start
+						&& i64::from(back.start) - i64::from(record.start) >= self.span
 				} else {
 					record.contig == front.contig
 				}

@@ -110,9 +110,10 @@ fn eval<S: Site>(
 		}
 		Node::Not(node) => {
 			eval(context, node, scratch, depth)?;
-			for flag in &mut slot(scratch, depth)?.flags {
-				*flag = !*flag;
-			}
+			let slot = slot(scratch, depth)?;
+			let truth = slot.truth();
+			slot.reset(Shape::Site);
+			slot.flags.push(!truth);
 		}
 		Node::Negate(node) => {
 			eval(context, node, scratch, depth)?;
@@ -249,15 +250,14 @@ fn load_site<S: Site>(
 }
 
 fn push_numbers(loaded: &Loaded, selected: Select, out: &mut Vec<f64>, keep_width: usize) {
-	let start = out.len();
 	match loaded.cells() {
 		Cells::Ints(_) => {
 			for (index, &value) in loaded.ints().iter().enumerate() {
-				if value == END_INT {
-					continue;
-				}
 				out.push(
-					if value == MISSING_INT || !selected.contains(index % keep_width) {
+					if value == MISSING_INT
+						|| value == END_INT
+						|| !selected.contains(index % keep_width)
+					{
 						f64::NAN
 					} else {
 						f64::from(value)
@@ -267,19 +267,17 @@ fn push_numbers(loaded: &Loaded, selected: Select, out: &mut Vec<f64>, keep_widt
 		}
 		Cells::Floats(_) => {
 			for (index, &value) in loaded.floats().iter().enumerate() {
-				if is_end_float(value) {
-					continue;
-				}
-				out.push(if selected.contains(index % keep_width) {
-					f64::from(value)
-				} else {
-					f64::NAN
-				});
+				out.push(
+					if is_end_float(value) || !selected.contains(index % keep_width) {
+						f64::NAN
+					} else {
+						f64::from(value)
+					},
+				);
 			}
 		}
 		_ => {}
 	}
-	let _ = start;
 }
 
 fn load_info<S: Site>(
@@ -300,6 +298,7 @@ fn load_info<S: Site>(
 		ValueType::Flag => out.numbers.push(1.0),
 		ValueType::Integer | ValueType::Float => {
 			let width = loaded.width().max(1);
+			let elements = if width == 1 { Select::All } else { elements };
 			push_numbers(
 				loaded,
 				elements,
@@ -335,12 +334,10 @@ fn load_format<S: Site>(
 	}
 	let width = loaded.width().max(1);
 	out.width = width;
+	out.selected = samples;
 	match value_type {
 		ValueType::Integer | ValueType::Float | ValueType::Flag => {
 			push_numbers(loaded, elements, &mut out.numbers, width);
-			if out.numbers.len() != loaded.ints().len().max(loaded.floats().len()) {
-				return Err(Error::Bcf("FORMAT vector has an end marker in the middle"));
-			}
 			for (index, number) in out.numbers.iter_mut().enumerate() {
 				if !samples.contains(index / width) {
 					*number = f64::NAN;
@@ -375,6 +372,7 @@ fn genotype<S: Site>(
 	} = scratch;
 	let out = pool.get_mut(depth).ok_or(NOT_PRESENT)?;
 	out.reset(Shape::Samples);
+	out.selected = samples;
 	let key = context
 		.header
 		.key("GT")
@@ -384,8 +382,9 @@ fn genotype<S: Site>(
 	}
 	for sample in 0..loaded.samples() {
 		let alleles = loaded.sample_ints(sample);
-		let matched = samples.contains(sample) && genotype_matches(alleles, pattern, text);
-		out.flags.push(matched != negated);
+		let matched = genotype_matches(alleles, pattern, text);
+		out.flags
+			.push(samples.contains(sample) && matched != negated);
 	}
 	Ok(())
 }
@@ -455,7 +454,9 @@ fn is_missing(negated: bool, scratch: &mut Scratch, depth: usize) -> Result<(), 
 		Shape::Site => spare.flags.push(missing(source, 0) != negated),
 		Shape::Samples => {
 			for sample in 0..source.sample_count() {
-				spare.flags.push(missing(source, sample) != negated);
+				spare
+					.flags
+					.push(source.is_selected(sample) && missing(source, sample) != negated);
 			}
 		}
 	}
@@ -492,15 +493,17 @@ fn compare(
 	spare.reset(shape);
 	let count = if shape == Shape::Site { 1 } else { shared };
 	for sample in 0..count {
-		let result = if text {
-			text_test(comparison, left, right, sample)
-		} else {
-			let lefts = left.number_items(sample);
-			let rights = right.number_items(sample);
-			lefts
-				.iter()
-				.any(|&l| rights.iter().any(|&r| number_test(comparison, l, r)))
-		};
+		let result = left.is_selected(sample)
+			&& right.is_selected(sample)
+			&& if text {
+				text_test(comparison, left, right, sample)
+			} else {
+				let lefts = left.number_items(sample);
+				let rights = right.number_items(sample);
+				lefts
+					.iter()
+					.any(|&l| rights.iter().any(|&r| number_test(comparison, l, r)))
+			};
 		spare.flags.push(result);
 	}
 	finish(scratch, depth)
@@ -531,7 +534,8 @@ fn matches_regex(
 	spare.reset(source.shape);
 	let test = |sample: usize| {
 		let range = source.item_range(sample);
-		!range.is_empty()
+		source.is_selected(sample)
+			&& !range.is_empty()
 			&& range
 				.clone()
 				.any(|index| regex.is_match(source.item(index)))
@@ -564,34 +568,41 @@ fn arithmetic(operator: Arithmetic, scratch: &mut Scratch, depth: usize) -> Resu
 		right.shape
 	};
 	spare.reset(shape);
-	spare.width = if left.shape == Shape::Samples {
-		left.width
-	} else {
-		right.width
+	spare.selected = match (left.shape, right.shape) {
+		(Shape::Samples, Shape::Samples) => left.selected.intersect(right.selected),
+		(Shape::Samples, Shape::Site) => left.selected,
+		(Shape::Site, Shape::Samples) => right.selected,
+		(Shape::Site, Shape::Site) => Select::All,
 	};
-	let length = if left.numbers.is_empty() || right.numbers.is_empty() {
-		0
-	} else {
-		left.numbers.len().max(right.numbers.len())
+	let count = match shape {
+		Shape::Site => 1,
+		Shape::Samples => left.sample_count().max(right.sample_count()),
 	};
-	for index in 0..length {
-		let a = left
-			.numbers
-			.get(index % left.numbers.len())
-			.copied()
-			.unwrap_or(f64::NAN);
-		let b = right
-			.numbers
-			.get(index % right.numbers.len())
-			.copied()
-			.unwrap_or(f64::NAN);
-		spare.numbers.push(match operator {
-			Arithmetic::Add => a + b,
-			Arithmetic::Subtract => a - b,
-			Arithmetic::Multiply => a * b,
-			Arithmetic::Divide => a / b,
-		});
+	let mut width = 1;
+	for sample in 0..count {
+		let lefts = left.number_items(sample);
+		let rights = right.number_items(sample);
+		let length = if lefts.is_empty() || rights.is_empty() {
+			0
+		} else {
+			lefts.len().max(rights.len())
+		};
+		width = width.max(length);
+		for index in 0..length {
+			let a = lefts.get(index % lefts.len()).copied().unwrap_or(f64::NAN);
+			let b = rights
+				.get(index % rights.len())
+				.copied()
+				.unwrap_or(f64::NAN);
+			spare.numbers.push(match operator {
+				Arithmetic::Add => a + b,
+				Arithmetic::Subtract => a - b,
+				Arithmetic::Multiply => a * b,
+				Arithmetic::Divide => a / b,
+			});
+		}
 	}
+	spare.width = width;
 	finish(scratch, depth)
 }
 
@@ -637,6 +648,7 @@ fn call(function: Function, scratch: &mut Scratch, depth: usize) -> Result<(), E
 		Function::Abs => {
 			spare.shape = source.shape;
 			spare.width = source.width;
+			spare.selected = source.selected;
 			spare
 				.numbers
 				.extend(source.numbers.iter().map(|number| number.abs()));

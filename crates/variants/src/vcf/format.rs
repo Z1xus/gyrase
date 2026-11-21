@@ -144,6 +144,15 @@ pub(crate) fn push_text(out: &mut Vec<u8>, bytes: &[u8]) {
 	out.extend_from_slice(bytes.get(..end).unwrap_or_default());
 }
 
+pub(crate) fn push_sample_text(out: &mut Vec<u8>, bytes: &[u8]) {
+	let before = out.len();
+	push_text(out, bytes);
+	if out.len() == before || out.get(before..) == Some(&[MISSING_STRING_BYTE]) {
+		out.truncate(before);
+		out.push(b'.');
+	}
+}
+
 fn write_samples(record: &Record, header: &Header, out: &mut Vec<u8>) -> Result<(), Error> {
 	if record.format.is_empty() {
 		out.extend_from_slice(b"\t.");
@@ -206,14 +215,7 @@ fn write_sample_field(
 				.text(&field.cells)
 				.get(start..end)
 				.ok_or(Error::Bcf("FORMAT field is truncated"))?;
-			match values {
-				[byte] => out.push(if *byte == MISSING_STRING_BYTE {
-					b'.'
-				} else {
-					*byte
-				}),
-				_ => push_text(out, values),
-			}
+			push_sample_text(out, values);
 		}
 		Cells::Flag => return Err(Error::Bcf("FORMAT field without values")),
 	}
@@ -239,7 +241,7 @@ pub(crate) fn write_genotype(
 			out.push(if value & 1 == 1 { b'|' } else { b'/' });
 			any_unphased |= value & 1 == 0;
 		}
-		if value >> 1 == 0 {
+		if value == MISSING_INT || value >> 1 == 0 {
 			out.push(b'.');
 		} else {
 			push_int(out, i64::from((value >> 1) - 1));

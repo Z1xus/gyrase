@@ -35,13 +35,19 @@ impl Group {
 	}
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+	Pending,
+	Included,
+	Done,
+}
+
 #[derive(Debug)]
 struct Candidate {
 	input: usize,
 	slot: usize,
 	types: u16,
-	included: bool,
-	done: bool,
+	state: State,
 	map: Vec<usize>,
 }
 
@@ -84,11 +90,15 @@ fn allele_type(reference: &[u8], alt: &[u8]) -> u16 {
 	if bits == 0 { REF } else { bits }
 }
 
+fn breakend(allele: &[u8]) -> bool {
+	allele.contains(&b'[') || allele.contains(&b']')
+}
+
 fn same_allele(left: &[u8], right: &[u8]) -> bool {
 	if left.first() == Some(&b'<')
 		|| right.first() == Some(&b'<')
-		|| left.contains(&b'[')
-		|| left.contains(&b']')
+		|| breakend(left)
+		|| breakend(right)
 	{
 		left == right
 	} else {
@@ -97,7 +107,7 @@ fn same_allele(left: &[u8], right: &[u8]) -> bool {
 }
 
 fn symbolic(allele: &[u8]) -> bool {
-	matches!(allele.first(), Some(b'<' | b'*'))
+	matches!(allele.first(), Some(b'<' | b'*')) || breakend(allele)
 }
 
 struct Offset {
@@ -232,7 +242,7 @@ fn trailing_common(alleles: &[Vec<u8>]) -> usize {
 		for alt in alleles.iter().skip(1) {
 			finished |= length >= alt.len();
 			let other = alt.len().checked_sub(length).and_then(|at| alt.get(at));
-			if other != tail {
+			if !matches!((other, tail), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b)) {
 				finished = true;
 				break;
 			}
@@ -262,7 +272,7 @@ impl Collapse {
 fn compatible(
 	collapse: Collapse,
 	selected: u16,
-	rec_types: u16,
+	record_types: u16,
 	record: &Record,
 	known: &[Vec<u8>],
 ) -> bool {
@@ -275,22 +285,22 @@ fn compatible(
 	if collapse == Collapse::All {
 		return true;
 	}
-	if selected & !REF == 0 || rec_types & !REF == 0 {
+	if selected & !REF == 0 || record_types & !REF == 0 {
 		return true;
 	}
 	if collapse.multiallelic() {
-		if collapse.snps() && rec_types & SNPS != 0 && selected & SNPS != 0 {
+		if collapse.snps() && record_types & SNPS != 0 && selected & SNPS != 0 {
 			return true;
 		}
-		if collapse.indels() && rec_types & INDELS != 0 && selected & INDELS != 0 {
+		if collapse.indels() && record_types & INDELS != 0 && selected & INDELS != 0 {
 			return true;
 		}
 	}
-	let common = selected & rec_types;
-	if common == 0 || (common != selected && common != rec_types) {
+	let common = selected & record_types;
+	if common == 0 || (common != selected && common != record_types) {
 		return false;
 	}
-	if collapse == Collapse::Exact && (common != selected || common != rec_types) {
+	if collapse == Collapse::Exact && (common != selected || common != record_types) {
 		return false;
 	}
 	let (Some(first), Some(reference)) = (known.first(), record.allele(0)) else {
@@ -335,8 +345,7 @@ impl Groups {
 					input,
 					slot,
 					types: types(record),
-					included: false,
-					done: false,
+					state: State::Pending,
 					map: Vec::new(),
 				});
 			}
@@ -359,8 +368,10 @@ impl Groups {
 		for run in &self.runs {
 			let mut mask = 0;
 			for candidate in self.candidates.get_mut(run.clone()).unwrap_or_default() {
-				candidate.included = false;
-				if !candidate.done {
+				if candidate.state == State::Included {
+					candidate.state = State::Pending;
+				}
+				if candidate.state == State::Pending {
 					mask |= candidate.types;
 				}
 			}
@@ -378,7 +389,7 @@ impl Groups {
 			let Some(candidate) = self.candidates.get(index) else {
 				break;
 			};
-			if candidate.done {
+			if candidate.state == State::Done {
 				continue;
 			}
 			let types = candidate.types;
@@ -399,7 +410,7 @@ impl Groups {
 			.candidates
 			.get_mut(index)
 			.ok_or(Error::Limits("records"))?;
-		candidate.included = true;
+		candidate.state = State::Included;
 		if self.alleles.is_empty() {
 			self.alleles = incoming.iter().map(|allele| allele.to_vec()).collect();
 			candidate.map = (0..incoming.len()).collect();
@@ -454,7 +465,7 @@ impl Groups {
 				run.clone().filter(|&index| {
 					self.candidates
 						.get(index)
-						.is_some_and(|candidate| candidate.included && !candidate.done)
+						.is_some_and(|candidate| candidate.state == State::Included)
 				})
 			};
 			let mut found = usable().find(|&index| {
@@ -528,7 +539,7 @@ impl Groups {
 			}
 		}
 		let trim = trailing_common(&alleles);
-		for allele in &mut alleles {
+		for allele in alleles.iter_mut().filter(|allele| !symbolic(allele)) {
 			allele.truncate(allele.len().saturating_sub(trim));
 		}
 		let mut members = Vec::with_capacity(chosen.len());
@@ -537,7 +548,7 @@ impl Groups {
 				.candidates
 				.get_mut(index)
 				.ok_or(Error::Limits("records"))?;
-			candidate.done = true;
+			candidate.state = State::Done;
 			let map = candidate
 				.map
 				.iter()

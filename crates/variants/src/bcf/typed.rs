@@ -9,7 +9,7 @@ const INT16_END: i16 = i16::MIN + 1;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Typed<'a> {
-	pub ty: BcfType,
+	pub bcf_type: BcfType,
 	pub len: usize,
 	pub bytes: &'a [u8],
 }
@@ -50,36 +50,44 @@ impl<'a> Cursor<'a> {
 			.take(1)?
 			.first()
 			.ok_or(Error::Bcf("record is truncated"))?;
-		let ty = BcfType::from_code(byte & 0x0f).ok_or(Error::Bcf("unknown value type"))?;
+		let bcf_type = BcfType::from_code(byte & 0x0f).ok_or(Error::Bcf("unknown value type"))?;
 		let len = byte >> 4;
 		if len != LONG_LENGTH {
-			return Ok((ty, usize::from(len)));
+			return Ok((bcf_type, usize::from(len)));
 		}
 		let length = self.typed()?;
 		let value = length
 			.scalar_int()
 			.and_then(|value| usize::try_from(value).ok())
 			.ok_or(Error::Bcf("invalid vector length"))?;
-		Ok((ty, value))
+		Ok((bcf_type, value))
 	}
 
 	pub fn typed(&mut self) -> Result<Typed<'a>, Error> {
-		let (ty, len) = self.descriptor()?;
+		let (bcf_type, len) = self.descriptor()?;
 		let width = len
-			.checked_mul(ty.width())
+			.checked_mul(bcf_type.width())
 			.ok_or(Error::Bcf("length overflow"))?;
 		let bytes = self.take(width)?;
-		Ok(Typed { ty, len, bytes })
+		Ok(Typed {
+			bcf_type,
+			len,
+			bytes,
+		})
 	}
 
 	pub fn typed_repeated(&mut self, repeat: usize) -> Result<Typed<'a>, Error> {
-		let (ty, len) = self.descriptor()?;
+		let (bcf_type, len) = self.descriptor()?;
 		let width = len
 			.checked_mul(repeat)
-			.and_then(|total| total.checked_mul(ty.width()))
+			.and_then(|total| total.checked_mul(bcf_type.width()))
 			.ok_or(Error::Bcf("length overflow"))?;
 		let bytes = self.take(width)?;
-		Ok(Typed { ty, len, bytes })
+		Ok(Typed {
+			bcf_type,
+			len,
+			bytes,
+		})
 	}
 }
 
@@ -92,11 +100,11 @@ impl Typed<'_> {
 	}
 
 	pub fn ints(&self) -> impl Iterator<Item = i32> + '_ {
-		let ty = self.ty;
-		let step = ty.width();
+		let bcf_type = self.bcf_type;
+		let step = bcf_type.width();
 		self.bytes
 			.chunks_exact(step)
-			.filter_map(move |chunk| int_from(ty, chunk))
+			.filter_map(move |chunk| int_from(bcf_type, chunk))
 	}
 
 	pub fn floats(&self) -> impl Iterator<Item = f32> + '_ {
@@ -108,7 +116,7 @@ impl Typed<'_> {
 	}
 
 	pub fn push_to(&self, store: &mut Store) -> Cells {
-		match self.ty {
+		match self.bcf_type {
 			BcfType::Null => Cells::Flag,
 			BcfType::Int8 | BcfType::Int16 | BcfType::Int32 => store.push_ints(self.ints()),
 			BcfType::Float => store.push_floats(float_values(self.bytes)),
@@ -125,8 +133,8 @@ pub(crate) fn float_values(bytes: &[u8]) -> impl Iterator<Item = f32> + '_ {
 		.map(|chunk| f32::from_bits(u32::from_le_bytes(*chunk)))
 }
 
-fn int_from(ty: BcfType, chunk: &[u8]) -> Option<i32> {
-	match ty {
+fn int_from(bcf_type: BcfType, chunk: &[u8]) -> Option<i32> {
+	match bcf_type {
 		BcfType::Int8 => {
 			let value = i8::from_le_bytes([*chunk.first()?]);
 			Some(match value {

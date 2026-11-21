@@ -7,7 +7,7 @@ use gyrase_genome::{Contig, Contigs};
 use crate::Error;
 use crate::value::{Number, ValueType};
 pub use line::FieldDef;
-use line::{Line, LineKind, parse_line};
+use line::{Line, LineKind, Parsed, parse_line};
 
 const PASS_LINE: &str = "##FILTER=<ID=PASS,Description=\"All filters passed\">";
 const COLUMNS: &str = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO";
@@ -76,22 +76,32 @@ impl Header {
 			version: Version { major: 4, minor: 2 },
 		};
 		let mut seen = HashSet::new();
-		let mut ordered: Vec<&str> = meta.to_vec();
-		let first_is_format = ordered
+		let first_is_format = meta
 			.first()
 			.is_some_and(|line| line.starts_with("##fileformat="));
 		if !first_is_format {
 			return Err(Error::Header("first line is not ##fileformat"));
 		}
-		ordered.insert(1, PASS_LINE);
-		for text in ordered {
-			header.add_line(text, &mut seen)?;
+		let mut parsed = meta
+			.iter()
+			.map(|text| parse_line(text.trim_end()))
+			.collect::<Result<Vec<_>, _>>()?;
+		let indexed = parsed.iter().any(|line| line.explicit_index.is_some());
+		let has_pass = parsed.iter().any(|line| {
+			line.line.kind == LineKind::Filter && line.line.id.as_deref() == Some("PASS")
+		});
+		if !indexed {
+			parsed.insert(1, parse_line(PASS_LINE)?);
+		} else if !has_pass {
+			parsed.push(parse_line(PASS_LINE)?);
+		}
+		for line in parsed {
+			header.add_line(line, &mut seen)?;
 		}
 		Ok(header)
 	}
 
-	fn add_line(&mut self, text: &str, seen: &mut HashSet<String>) -> Result<(), Error> {
-		let parsed = parse_line(text.trim_end())?;
+	fn add_line(&mut self, parsed: Parsed, seen: &mut HashSet<String>) -> Result<(), Error> {
 		let mut line = parsed.line;
 		let identity = match &line.id {
 			Some(id) => format!("{:?}:{id}", line.kind),
@@ -105,7 +115,8 @@ impl Header {
 				self.version = parse_version(&line.text).unwrap_or(self.version);
 			}
 			(LineKind::Contig, Some(id)) => {
-				let index = self.register_contig(&id, parsed.contig_length)?;
+				let index =
+					self.register_contig(&id, parsed.contig_length, parsed.explicit_index)?;
 				line.dictionary_id = Some(index);
 			}
 			(LineKind::Info | LineKind::Format | LineKind::Filter, Some(id)) => {
@@ -128,8 +139,16 @@ impl Header {
 		Ok(())
 	}
 
-	fn register_contig(&mut self, name: &str, length: Option<u64>) -> Result<u32, Error> {
+	fn register_contig(
+		&mut self,
+		name: &str,
+		length: Option<u64>,
+		explicit: Option<u32>,
+	) -> Result<u32, Error> {
 		let index = u32::try_from(self.contigs.len()).map_err(|_| Error::Limits("contigs"))?;
+		if explicit.is_some_and(|explicit| explicit != index) {
+			return Err(Error::Header("contig IDX values are not sequential"));
+		}
 		self.contig_ids.insert(name.to_owned(), index);
 		self.contigs.push(ContigEntry {
 			name: name.to_owned(),
@@ -264,6 +283,18 @@ impl Header {
 	}
 
 	fn with_lines_of(&self, other: &Self) -> Result<Self, Error> {
+		for (_, entry) in other.keys() {
+			let Some(existing) = self.key(&entry.name).and_then(|key| self.entry(key)) else {
+				continue;
+			};
+			if conflicts(existing.info.as_ref(), entry.info.as_ref())
+				|| conflicts(existing.format.as_ref(), entry.format.as_ref())
+			{
+				return Err(Error::Incompatible(
+					"a tag has different Number or Type definitions",
+				));
+			}
+		}
 		let extra: Vec<&str> = other
 			.meta_lines()
 			.filter(|line| !line.starts_with("##fileformat="))
@@ -353,6 +384,12 @@ impl Header {
 }
 
 const MAX_DICTIONARY: usize = 1 << 22;
+
+fn conflicts(first: Option<&FieldDef>, second: Option<&FieldDef>) -> bool {
+	first
+		.zip(second)
+		.is_some_and(|(first, second)| first != second)
+}
 
 fn parse_samples(line: &str) -> Result<Vec<String>, Error> {
 	let mut columns = line.split('\t');

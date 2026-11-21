@@ -38,7 +38,13 @@ impl Interval {
 			.strip_prefix('{')
 			.and_then(|rest| rest.split_once('}'))
 		{
-			Some((name, rest)) => (name, rest.strip_prefix(':').unwrap_or(rest)),
+			Some((name, "")) => {
+				let contig = contigs
+					.resolve(name)
+					.ok_or_else(|| Error::UnknownContig(name.to_owned()))?;
+				return Self::whole(contig, contigs).ok_or_else(invalid);
+			}
+			Some((name, rest)) => (name, rest.strip_prefix(':').ok_or_else(invalid)?),
 			None => trimmed
 				.rsplit_once(':')
 				.ok_or_else(|| Error::UnknownContig(trimmed.to_owned()))?,
