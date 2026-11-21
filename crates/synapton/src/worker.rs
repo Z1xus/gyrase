@@ -10,8 +10,9 @@ use crate::candidate::{Candidate, settle, ungapped};
 use crate::chain::Chain;
 use crate::config::AlignConfig;
 use crate::describe::{self, describe};
-use crate::extend::{Extender, ExtensionBatch, ExtensionResults, Outcome};
+use crate::extend::{ExtensionBatch, ExtensionResults, Outcome};
 use crate::index::Index;
+use crate::kernel::{self, CpuScratch};
 use crate::mapper::Mapper;
 use crate::mapq;
 use crate::nucleotide::encode;
@@ -77,11 +78,10 @@ struct Emission {
 }
 
 #[derive(Debug)]
-pub(crate) struct Worker<'a, E: Extender> {
+pub(crate) struct Worker<'a> {
 	index: &'a Index,
 	config: AlignConfig,
-	extender: &'a E,
-	scratch: E::Scratch,
+	scratch: CpuScratch,
 	mapper: Mapper<'a>,
 	voter: Voter,
 	chains: Vec<Chain>,
@@ -100,13 +100,12 @@ pub(crate) struct Worker<'a, E: Extender> {
 	accepted: Vec<usize>,
 }
 
-impl<'a, E: Extender> Worker<'a, E> {
-	pub(crate) fn new(index: &'a Index, config: AlignConfig, extender: &'a E) -> Self {
+impl<'a> Worker<'a> {
+	pub(crate) fn new(index: &'a Index, config: AlignConfig) -> Self {
 		Self {
 			index,
 			config,
-			extender,
-			scratch: E::Scratch::default(),
+			scratch: CpuScratch::default(),
 			mapper: Mapper::new(index, &config),
 			voter: Voter::default(),
 			chains: Vec::new(),
@@ -233,13 +232,6 @@ impl<'a, E: Extender> Worker<'a, E> {
 		let Some((contig, span)) = reference.locate(chain.reference_start) else {
 			return;
 		};
-		if reference
-			.locate(chain.reference_end.saturating_sub(1))
-			.map(|found| found.0)
-			!= Some(contig)
-		{
-			return;
-		}
 		let span_start = span.start;
 		let start = chain.diagonal_middle;
 		reference.window(span, start, query.len(), &mut self.window);
@@ -286,7 +278,7 @@ impl<'a, E: Extender> Worker<'a, E> {
 		if self.batch.len() == 0 {
 			return;
 		}
-		self.extender.extend(
+		kernel::extend(
 			&self.config.scoring,
 			&mut self.scratch,
 			&self.batch,
@@ -545,7 +537,7 @@ impl<'a, E: Extender> Worker<'a, E> {
 			&self.config.scoring,
 			choice.score,
 			choice.runner_up,
-			choice.competing.saturating_sub(1),
+			choice.competing,
 			repeat,
 		);
 		let adjust = |decision: Decision| Decision {
@@ -660,7 +652,7 @@ impl<'a, E: Extender> Worker<'a, E> {
 				_ => mapq::single_end(&self.config.scoring, candidate, &competition, repeat),
 			};
 			let extra = Emission {
-				flags: flags.with(kind),
+				flags: extra_flags(flags, kind),
 				mapq: own,
 				suboptimal: competition.best_other,
 				primary: false,
@@ -713,7 +705,7 @@ impl<'a, E: Extender> Worker<'a, E> {
 				query: aligned,
 				reference: &self.window,
 				left_clip: candidate.query_start,
-				right_clip: u32_of(query.length) - candidate.query_stop,
+				right_clip: u32_of(query.length).saturating_sub(candidate.query_stop),
 			},
 			&mut self.cigar,
 			&mut self.md,
@@ -741,6 +733,13 @@ impl<'a, E: Extender> Worker<'a, E> {
 				md,
 			}),
 		});
+	}
+}
+
+fn extra_flags(flags: FlagSet, kind: Flag) -> FlagSet {
+	match kind {
+		Flag::Secondary => flags.without(Flag::ProperPair).with(kind),
+		_ => flags.with(kind),
 	}
 }
 

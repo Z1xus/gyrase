@@ -27,7 +27,7 @@ impl ContigSpan {
 }
 
 #[derive(Debug)]
-pub struct PackedReference {
+pub(crate) struct PackedReference {
 	words: Vec<u64>,
 	length: u64,
 	ambiguous: Vec<Range<u64>>,
@@ -54,7 +54,7 @@ const fn padded(length: u64) -> u64 {
 }
 
 impl PackedReference {
-	pub fn from_fasta(reference: &Reference, workers: &Workers) -> Result<Self, Error> {
+	pub(crate) fn from_fasta(reference: &Reference, workers: &Workers) -> Result<Self, Error> {
 		let mut spans = Vec::new();
 		let mut tiles = Vec::new();
 		let mut flat = 0u64;
@@ -89,21 +89,25 @@ impl PackedReference {
 				.collect()
 		});
 		let mut words = vec![0u64; usize::try_from(flat / WORD_BASES)? + 1];
-		let mut ambiguous: Vec<Range<u64>> = Vec::new();
+		let mut runs: Vec<Range<u64>> = Vec::new();
 		for tile in packed {
 			let tile = tile?;
 			let target = words
 				.get_mut(tile.first_word..tile.first_word + tile.words.len())
 				.ok_or(Error::CorruptIndex("tile outside reference"))?;
 			target.copy_from_slice(&tile.words);
-			for run in tile.ambiguous {
-				push_run(&mut ambiguous, run);
-			}
+			runs.extend(tile.ambiguous);
 		}
-		for span in &spans {
-			push_run(&mut ambiguous, span.end()..span.start + padded(span.length));
+		runs.extend(
+			spans
+				.iter()
+				.map(|span| span.end()..span.start + padded(span.length)),
+		);
+		runs.sort_unstable_by_key(|run| run.start);
+		let mut ambiguous: Vec<Range<u64>> = Vec::new();
+		for run in runs {
+			push_run(&mut ambiguous, run);
 		}
-		ambiguous.retain(|run| run.start < run.end);
 		Self::from_parts(words, flat, ambiguous, spans, reference.contigs().clone())
 	}
 
@@ -141,11 +145,11 @@ impl PackedReference {
 		})
 	}
 
-	pub fn contigs(&self) -> &Contigs {
+	pub(crate) fn contigs(&self) -> &Contigs {
 		&self.contigs
 	}
 
-	pub fn checksum(&self) -> u64 {
+	pub(crate) fn checksum(&self) -> u64 {
 		self.checksum
 	}
 

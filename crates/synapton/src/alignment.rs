@@ -100,6 +100,10 @@ impl FlagSet {
 		Self(self.0 | flag.bit())
 	}
 
+	pub(crate) const fn without(self, flag: Flag) -> Self {
+		Self(self.0 & !flag.bit())
+	}
+
 	pub const fn contains(self, flag: Flag) -> bool {
 		self.0 & flag.bit() != 0
 	}

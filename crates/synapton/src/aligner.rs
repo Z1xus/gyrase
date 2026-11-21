@@ -4,9 +4,7 @@ use rayon::prelude::*;
 use crate::Error;
 use crate::alignment::AlignedBatch;
 use crate::config::AlignConfig;
-use crate::extend::Extender;
 use crate::index::Index;
-use crate::kernel::CpuExtender;
 use crate::num::u32_of;
 use crate::pairing::InsertModel;
 use crate::worker::{Layout, Worker};
@@ -61,31 +59,18 @@ fn pair_sequences<'a>(pairs: &[ReadPair<'a>]) -> Result<Vec<&'a [u8]>, Error> {
 }
 
 #[derive(Debug)]
-pub struct Aligner<'a, E: Extender = CpuExtender> {
+pub struct Aligner<'a> {
 	index: &'a Index,
 	config: AlignConfig,
 	workers: &'a Workers,
-	extender: E,
 }
 
 impl<'a> Aligner<'a> {
 	pub fn new(index: &'a Index, config: AlignConfig, workers: &'a Workers) -> Self {
-		Self::with_extender(index, config, workers, CpuExtender)
-	}
-}
-
-impl<'a, E: Extender> Aligner<'a, E> {
-	pub fn with_extender(
-		index: &'a Index,
-		config: AlignConfig,
-		workers: &'a Workers,
-		extender: E,
-	) -> Self {
 		Self {
 			index,
 			config,
 			workers,
-			extender,
 		}
 	}
 
@@ -125,7 +110,7 @@ impl<'a, E: Extender> Aligner<'a, E> {
 			sample
 				.par_chunks(chunk)
 				.map_init(
-					|| Worker::new(self.index, self.config, &self.extender),
+					|| Worker::new(self.index, self.config),
 					|worker, part| {
 						let mut found = Vec::new();
 						worker.distances(part, &mut found);
@@ -145,7 +130,7 @@ impl<'a, E: Extender> Aligner<'a, E> {
 				.par_chunks(chunk)
 				.enumerate()
 				.map_init(
-					|| Worker::new(self.index, self.config, &self.extender),
+					|| Worker::new(self.index, self.config),
 					|worker, (number, part)| {
 						let mut out = AlignedBatch::default();
 						let first_read = u32_of(number * self.config.chunk_reads.max(1));

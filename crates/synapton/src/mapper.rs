@@ -61,9 +61,7 @@ impl<'a> Mapper<'a> {
 				.then(left.strand.index().cmp(&right.strand.index()))
 				.then(left.reference_start.cmp(&right.reference_start))
 		});
-		Mapped {
-			repeat_fraction: (repeat_fraction / 2.0).min(1.0),
-		}
+		Mapped { repeat_fraction }
 	}
 
 	fn pass(
@@ -74,13 +72,13 @@ impl<'a> Mapper<'a> {
 		chains: &mut Vec<Chain>,
 	) -> f32 {
 		chains.clear();
-		let mut repeat_fraction = 0.0;
+		let mut repeat_fraction = 0.0f32;
 		for strand in [Strand::Forward, Strand::Reverse] {
 			let codes = match strand {
 				Strand::Forward => forward,
 				Strand::Reverse => reverse,
 			};
-			repeat_fraction += self.chains_for(codes, strand, cutoff, chains);
+			repeat_fraction = repeat_fraction.max(self.chains_for(codes, strand, cutoff, chains));
 		}
 		repeat_fraction
 	}
@@ -126,8 +124,13 @@ impl<'a> Mapper<'a> {
 			}
 		}
 		let seed_length = u32::try_from(self.index.config().k).unwrap_or(u32::MAX);
-		self.chainer
-			.chain(&mut self.anchors, strand, seed_length, chains);
+		self.chainer.chain(
+			&mut self.anchors,
+			strand,
+			seed_length,
+			self.index.reference().spans(),
+			chains,
+		);
 		if self.seeds.is_empty() {
 			0.0
 		} else {

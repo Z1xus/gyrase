@@ -1,5 +1,6 @@
 use crate::alignment::Strand;
 use crate::num::i64_of;
+use crate::reference::ContigSpan;
 
 const QUERY_BITS: u32 = 20;
 const QUERY_MASK: u64 = (1 << QUERY_BITS) - 1;
@@ -15,7 +16,6 @@ pub(crate) struct Chain {
 	pub(crate) strand: Strand,
 	pub(crate) score: f32,
 	pub(crate) reference_start: u64,
-	pub(crate) reference_end: u64,
 	pub(crate) diagonal_low: i64,
 	pub(crate) diagonal_high: i64,
 	pub(crate) diagonal_middle: i64,
@@ -46,23 +46,22 @@ pub(crate) struct Chainer {
 }
 
 impl Chainer {
-	pub(crate) fn chain(
-		&mut self,
-		anchors: &mut Vec<u64>,
-		strand: Strand,
-		seed_length: u32,
-		chains: &mut Vec<Chain>,
-	) {
-		anchors.sort_unstable();
-		anchors.dedup();
-		let count = anchors.len();
+	fn score(&mut self, anchors: &[u64], seed_length: u32, spans: &[ContigSpan]) {
+		let mut span = anchors.first().map_or(0, |&first| {
+			spans.partition_point(|found| found.end() <= unpack(first).0)
+		});
 		self.scores.clear();
 		self.parents.clear();
-		self.used.clear();
-		self.used.resize(count, false);
 		let length = f32::from(u16::try_from(seed_length).unwrap_or(u16::MAX));
 		for (index, &anchor) in anchors.iter().enumerate() {
 			let (reference, query) = unpack(anchor);
+			while spans
+				.get(span)
+				.is_some_and(|found| found.end() <= reference)
+			{
+				span += 1;
+			}
+			let floor = spans.get(span).map_or(0, |found| found.start);
 			let mut best = length;
 			let mut parent = NO_PARENT;
 			let first = index.saturating_sub(MAX_LOOKBACK);
@@ -75,7 +74,7 @@ impl Chainer {
 			{
 				let (earlier_reference, earlier_query) = unpack(earlier);
 				let reference_gap = reference - earlier_reference;
-				if reference_gap > MAX_REFERENCE_GAP {
+				if reference_gap > MAX_REFERENCE_GAP || earlier_reference < floor {
 					break;
 				}
 				if earlier_query >= query || reference_gap == 0 {
@@ -101,6 +100,23 @@ impl Chainer {
 			self.scores.push(best);
 			self.parents.push(parent);
 		}
+	}
+
+	pub(crate) fn chain(
+		&mut self,
+		anchors: &mut Vec<u64>,
+		strand: Strand,
+		seed_length: u32,
+		spans: &[ContigSpan],
+		chains: &mut Vec<Chain>,
+	) {
+		anchors.sort_unstable();
+		anchors.dedup();
+		let count = anchors.len();
+		let length = f32::from(u16::try_from(seed_length).unwrap_or(u16::MAX));
+		self.score(anchors, seed_length, spans);
+		self.used.clear();
+		self.used.resize(count, false);
 		self.order.clear();
 		self.order.extend(0..count);
 		let scores = &self.scores;
@@ -138,14 +154,9 @@ impl Chainer {
 			if score < MIN_CHAIN_SCORE * length {
 				continue;
 			}
-			if let Some(chain) = summarize(
-				anchors,
-				&self.members,
-				&mut self.diagonals,
-				strand,
-				score,
-				seed_length,
-			) {
+			if let Some(chain) =
+				summarize(anchors, &self.members, &mut self.diagonals, strand, score)
+			{
 				chains.push(chain);
 			}
 		}
@@ -158,10 +169,8 @@ fn summarize(
 	diagonals: &mut Vec<i64>,
 	strand: Strand,
 	score: f32,
-	seed_length: u32,
 ) -> Option<Chain> {
 	let first = unpack(*anchors.get(*members.last()?)?);
-	let last = unpack(*anchors.get(*members.first()?)?);
 	let mut diagonal_low = i64::MAX;
 	let mut diagonal_high = i64::MIN;
 	diagonals.clear();
@@ -177,7 +186,6 @@ fn summarize(
 		strand,
 		score,
 		reference_start: first.0,
-		reference_end: last.0 + u64::from(seed_length),
 		diagonal_low,
 		diagonal_high,
 		diagonal_middle: *diagonals.get(diagonals.len() / 2)?,

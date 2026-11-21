@@ -2,7 +2,7 @@ use multiversion::multiversion;
 
 use crate::alignment::{CigarKind, CigarOp};
 use crate::config::Scoring;
-use crate::extend::{Extender, Extension, ExtensionBatch, ExtensionJob, ExtensionResults, Outcome};
+use crate::extend::{Extension, ExtensionBatch, ExtensionJob, ExtensionResults, Outcome};
 use crate::nucleotide::CODE_PAD;
 use crate::num::{u16_of, u32_of};
 
@@ -54,11 +54,8 @@ impl Penalties {
 	}
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CpuExtender;
-
 #[derive(Debug, Default)]
-pub struct CpuScratch {
+pub(crate) struct CpuScratch {
 	queries: Vec<Lane<u8>>,
 	references: Vec<Lane<u8>>,
 	scores: Vec<Lane<i16>>,
@@ -73,6 +70,7 @@ struct Tables<'a> {
 	queries: &'a [Lane<u8>],
 	references: &'a [Lane<u8>],
 	lengths: Lane<u16>,
+	bands: Lane<u16>,
 	band: usize,
 	penalties: Penalties,
 	scores: &'a mut [Lane<i16>],
@@ -96,6 +94,7 @@ fn fill(tables: &mut Tables<'_>) -> Best {
 		queries,
 		references,
 		lengths,
+		bands,
 		band,
 		penalties,
 		scores,
@@ -119,10 +118,10 @@ fn fill(tables: &mut Tables<'_>) -> Best {
 	for (row, query_row) in queries.iter().enumerate() {
 		let mut row_bonus = [0i16; LANES];
 		for (bonus, &length) in row_bonus.iter_mut().zip(lengths.iter()) {
-			*bonus = if usize::from(length) == row + 1 {
-				clip
-			} else {
-				0
+			*bonus = match usize::from(length).cmp(&(row + 1)) {
+				std::cmp::Ordering::Equal => clip,
+				std::cmp::Ordering::Greater => 0,
+				std::cmp::Ordering::Less => NEGATIVE,
 			};
 		}
 		let mut left = [NEGATIVE; LANES];
@@ -183,13 +182,19 @@ fn fill(tables: &mut Tables<'_>) -> Best {
 					cell = 0;
 					direction = DIRECTION_START;
 				}
+				let inside = k < usize::from(bands[lane]);
+				let (cell, insertion, deletion_value) = if inside {
+					(cell, insertion, deletion_value)
+				} else {
+					(NEGATIVE, NEGATIVE, NEGATIVE)
+				};
 				value[lane] = cell;
 				insertion_out[lane] = insertion;
 				deletion_out[lane] = deletion_value;
 				flags[lane] = direction
 					| (u8::from(insertion_extends) * INSERTION_EXTENDS)
 					| (u8::from(deletion_extends) * DELETION_EXTENDS);
-				let candidate = cell + row_bonus[lane];
+				let candidate = cell.saturating_add(row_bonus[lane]);
 				if candidate > row_best[lane] {
 					row_best[lane] = candidate;
 					row_diagonal[lane] = u16_of(k);
@@ -212,34 +217,29 @@ fn fill(tables: &mut Tables<'_>) -> Best {
 	best
 }
 
-impl Extender for CpuExtender {
-	type Scratch = CpuScratch;
-
-	fn extend(
-		&self,
-		scoring: &Scoring,
-		scratch: &mut CpuScratch,
-		batch: &ExtensionBatch,
-		results: &mut ExtensionResults,
-	) {
-		results.reset(batch.len());
-		let penalties = Penalties::new(scoring);
-		let mut order = std::mem::take(&mut scratch.order);
-		order.clear();
-		order.extend(0..u32_of(batch.len()));
-		order.sort_unstable_by_key(|&job| {
-			let spec = batch.jobs().get(job as usize);
-			(
-				spec.map_or(0, ExtensionJob::band),
-				spec.map_or(0, |spec| batch.query(spec).len()),
-				job,
-			)
-		});
-		for group in order.chunks(LANES) {
-			run_group(scratch, &penalties, batch, group, results);
-		}
-		scratch.order = order;
+pub(crate) fn extend(
+	scoring: &Scoring,
+	scratch: &mut CpuScratch,
+	batch: &ExtensionBatch,
+	results: &mut ExtensionResults,
+) {
+	results.reset(batch.len());
+	let penalties = Penalties::new(scoring);
+	let mut order = std::mem::take(&mut scratch.order);
+	order.clear();
+	order.extend(0..u32_of(batch.len()));
+	order.sort_unstable_by_key(|&job| {
+		let spec = batch.jobs().get(job as usize);
+		(
+			spec.map_or(0, ExtensionJob::band),
+			spec.map_or(0, |spec| batch.query(spec).len()),
+			job,
+		)
+	});
+	for group in order.chunks(LANES) {
+		run_group(scratch, &penalties, batch, group, results);
 	}
+	scratch.order = order;
 }
 
 fn run_group(
@@ -272,9 +272,11 @@ fn run_group(
 	scratch.references.clear();
 	scratch.references.resize(rows + band, [CODE_PAD; LANES]);
 	let mut lengths = [0u16; LANES];
+	let mut bands = [0u16; LANES];
 	for (lane, (_, job)) in jobs.iter().enumerate() {
 		let query = batch.query(job);
 		lengths[lane] = u16_of(query.len());
+		bands[lane] = job.band;
 		for (row, &code) in scratch.queries.iter_mut().zip(query) {
 			row[lane] = code;
 		}
@@ -284,6 +286,11 @@ fn run_group(
 	}
 	scratch.scores.clear();
 	scratch.scores.resize(band + 1, [penalties.clip; LANES]);
+	for (lane, &limit) in bands.iter().enumerate() {
+		for row in scratch.scores.iter_mut().skip(usize::from(limit)) {
+			row[lane] = NEGATIVE;
+		}
+	}
 	if let Some(sentinel) = scratch.scores.last_mut() {
 		*sentinel = [NEGATIVE; LANES];
 	}
@@ -295,6 +302,7 @@ fn run_group(
 		queries: &scratch.queries,
 		references: &scratch.references,
 		lengths,
+		bands,
 		band,
 		penalties: *penalties,
 		scores: &mut scratch.scores,
@@ -384,7 +392,7 @@ fn trace_lane(
 				} else {
 					State::Match
 				};
-				if row == 0 || diagonal + 1 >= band {
+				if row == 0 || diagonal + 1 >= job.band() {
 					break;
 				}
 				row -= 1;

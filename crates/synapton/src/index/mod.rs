@@ -72,7 +72,7 @@ impl Index {
 		self.reference.contigs()
 	}
 
-	pub fn reference(&self) -> &PackedReference {
+	pub(crate) fn reference(&self) -> &PackedReference {
 		&self.reference
 	}
 

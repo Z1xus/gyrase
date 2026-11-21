@@ -7,7 +7,7 @@ use gyrase_reads::{
 use crate::Error;
 use crate::aligner::{Read, ReadPair};
 use crate::alignment::{
-	AlignedBatch, Alignment, CigarKind, CigarOp, End, Mate, Placement, ReadId, Record, Strand,
+	AlignedBatch, Alignment, CigarKind, CigarOp, End, Flag, Mate, Placement, ReadId, Record, Strand,
 };
 
 const PHRED_OFFSET: u8 = 33;
@@ -114,7 +114,7 @@ impl<'a> BamEmitter<'a> {
 		self.record.set_name(read.name)?;
 		let strand = match &record.placement {
 			Placement::Mapped(alignment) => {
-				self.place(batch, alignment)?;
+				self.place(batch, alignment, home(template, record, alignment))?;
 				alignment.strand
 			}
 			Placement::Unmapped { flags, mate } => {
@@ -133,7 +133,9 @@ impl<'a> BamEmitter<'a> {
 		self.set_sequence(read, strand)?;
 		if let Placement::Mapped(alignment) = &record.placement {
 			self.push_alignment_tags(batch, alignment)?;
-			self.push_supplementary_list(batch, template, record)?;
+			if !alignment.flags.contains(Flag::Secondary) {
+				self.push_supplementary_list(batch, template, record)?;
+			}
 		}
 		if !matches!(record.read.end, End::Single) {
 			self.push_mate_tags(batch, source, template, record)?;
@@ -144,7 +146,12 @@ impl<'a> BamEmitter<'a> {
 		Ok(())
 	}
 
-	fn place(&mut self, batch: &AlignedBatch, alignment: &Alignment) -> Result<(), RecordError> {
+	fn place(
+		&mut self,
+		batch: &AlignedBatch,
+		alignment: &Alignment,
+		home: Location,
+	) -> Result<(), RecordError> {
 		self.record.set_flags(Flags::new(alignment.flags.bits()));
 		self.set_location(Location {
 			contig: alignment.contig,
@@ -157,10 +164,7 @@ impl<'a> BamEmitter<'a> {
 				contig: found.contig,
 				position: found.position,
 			}))?,
-			Mate::Unmapped => self.set_mate_location(Some(Location {
-				contig: alignment.contig,
-				position: alignment.position,
-			}))?,
+			Mate::Unmapped => self.set_mate_location(Some(home))?,
 			Mate::Unpaired => {}
 		}
 		self.operations.clear();
@@ -232,7 +236,7 @@ impl<'a> BamEmitter<'a> {
 			let Placement::Mapped(alignment) = &other.placement else {
 				continue;
 			};
-			let chimeric = !alignment.flags.contains(crate::Flag::Secondary);
+			let chimeric = !alignment.flags.contains(Flag::Secondary);
 			if other.read.end != own.read.end || std::ptr::eq(other, own) || !chimeric {
 				continue;
 			}
@@ -291,6 +295,21 @@ impl<'a> BamEmitter<'a> {
 	}
 }
 
+fn home(template: &[Record], own: &Record, alignment: &Alignment) -> Location {
+	let primary = template
+		.iter()
+		.find(|candidate| candidate.read.end == own.read.end)
+		.and_then(|candidate| match &candidate.placement {
+			Placement::Mapped(found) => Some(found),
+			Placement::Unmapped { .. } => None,
+		})
+		.unwrap_or(alignment);
+	Location {
+		contig: primary.contig,
+		position: primary.position,
+	}
+}
+
 fn mate_score(qualities: &[u8]) -> i64 {
 	qualities
 		.iter()
@@ -311,15 +330,19 @@ fn bam_operation(operation: CigarOp) -> Result<BamOp, RecordError> {
 }
 
 fn complement(base: u8) -> u8 {
-	match base {
+	match base.to_ascii_uppercase() {
 		b'A' => b'T',
 		b'C' => b'G',
 		b'G' => b'C',
-		b'T' => b'A',
-		b'a' => b't',
-		b'c' => b'g',
-		b'g' => b'c',
-		b't' => b'a',
+		b'T' | b'U' => b'A',
+		b'R' => b'Y',
+		b'Y' => b'R',
+		b'K' => b'M',
+		b'M' => b'K',
+		b'B' => b'V',
+		b'V' => b'B',
+		b'D' => b'H',
+		b'H' => b'D',
 		other => other,
 	}
 }

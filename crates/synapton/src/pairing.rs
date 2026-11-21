@@ -1,7 +1,7 @@
 use crate::alignment::Strand;
 use crate::candidate::Candidate;
 use crate::config::Scoring;
-use crate::num::{float_len, float_of, round_i32, round_i64};
+use crate::num::{float_len, float_of, round_i32, round_i64, u32_of};
 
 const DEFAULT_MEAN: f64 = 400.0;
 const DEFAULT_STD: f64 = 100.0;
@@ -130,43 +130,39 @@ pub(crate) fn choose_pair(
 	second: &[Candidate],
 ) -> Option<PairChoice> {
 	let unpaired = first.first()?.score + second.first()?.score - scoring.unpaired;
-	let mut best: Option<(usize, usize, i32)> = None;
-	let mut runner_up = i32::MIN;
-	let mut ties = 0u32;
-	for (left_index, left) in first.iter().take(MAX_PAIR_CANDIDATES).enumerate() {
-		for (right_index, right) in second.iter().take(MAX_PAIR_CANDIDATES).enumerate() {
-			let Some(span) = distance(left, right) else {
-				continue;
-			};
-			if !model.contains(span) {
-				continue;
-			}
-			let score = left.score + right.score + model.bonus(scoring, span);
-			match best {
-				Some((_, _, top)) if score <= top => {
-					if score > runner_up {
-						runner_up = score;
-					}
-					if score + i32::from(scoring.matched + scoring.mismatch) >= top {
-						ties += 1;
-					}
-				}
-				Some((_, _, top)) => {
-					runner_up = top;
-					ties = 1;
-					best = Some((left_index, right_index, score));
-				}
-				None => best = Some((left_index, right_index, score)),
-			}
-		}
-	}
-	let (left, right, score) = best?;
-	(score > unpaired).then_some(PairChoice {
+	let scored = || {
+		first
+			.iter()
+			.take(MAX_PAIR_CANDIDATES)
+			.enumerate()
+			.flat_map(|(left_index, left)| {
+				second
+					.iter()
+					.take(MAX_PAIR_CANDIDATES)
+					.enumerate()
+					.filter_map(move |(right_index, right)| {
+						let span = distance(left, right).filter(|&span| model.contains(span))?;
+						let score = left.score + right.score + model.bonus(scoring, span);
+						Some((left_index, right_index, score))
+					})
+			})
+	};
+	let (left, right, score) = scored().fold(None, |best, found| match best {
+		Some((_, _, top)) if found.2 <= top => best,
+		_ => Some(found),
+	})?;
+	let near = i32::from(scoring.matched + scoring.mismatch);
+	let others = || {
+		scored()
+			.filter(move |&(other_left, other_right, _)| (other_left, other_right) != (left, right))
+			.map(|(_, _, other)| other)
+	};
+	(score > unpaired).then(|| PairChoice {
 		first: left,
 		second: right,
 		score,
-		runner_up: runner_up.max(unpaired),
-		competing: ties,
+		runner_up: others().max().unwrap_or(i32::MIN).max(unpaired),
+		competing: u32_of(others().filter(|&other| other + near >= score).count()),
 	})
 }
 

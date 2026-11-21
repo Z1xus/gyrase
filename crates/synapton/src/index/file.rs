@@ -8,6 +8,7 @@ use gyrase_io::Workers;
 use rayon::prelude::*;
 
 use super::Index;
+use super::entry::MAX_BUCKET_BITS;
 use crate::Error;
 use crate::config::SeedConfig;
 use crate::hash::{checksum_chunk, checksum_words};
@@ -112,6 +113,9 @@ impl Header {
 		let w_max = reader.u32()? as usize;
 		let config = SeedConfig::new(k, s, w_min, w_max)?;
 		let bucket_bits = reader.u32()?;
+		if !(1..=MAX_BUCKET_BITS).contains(&bucket_bits) {
+			return Err(Error::CorruptIndex("bucket bits"));
+		}
 		let filter_cutoff = reader.u32()?;
 		reader.u32()?;
 		Ok(Self {

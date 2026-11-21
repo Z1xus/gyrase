@@ -28,7 +28,4 @@ pub use alignment::{
 pub use bam::{BamEmitter, EmitError, Source};
 pub use config::{AlignConfig, Scoring, SeedConfig};
 pub use error::Error;
-pub use extend::{Extender, Extension, ExtensionBatch, ExtensionJob, ExtensionResults, Outcome};
 pub use index::Index;
-pub use kernel::{CpuExtender, CpuScratch};
-pub use reference::PackedReference;
