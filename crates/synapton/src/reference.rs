@@ -207,6 +207,22 @@ impl PackedReference {
 		}
 	}
 
+	pub(crate) fn word_at(&self, position: u64) -> u64 {
+		let index = usize_of(position / WORD_BASES);
+		let shift = (position % WORD_BASES) * BITS_PER_BASE;
+		let low = self.words.get(index).copied().unwrap_or(0);
+		if shift == 0 {
+			return low;
+		}
+		let high = self.words.get(index + 1).copied().unwrap_or(0);
+		(low >> shift) | (high << (64 - shift))
+	}
+
+	pub(crate) fn has_ambiguous(&self, from: u64, to: u64) -> bool {
+		let run = self.ambiguous.partition_point(|run| run.end <= from);
+		self.ambiguous.get(run).is_some_and(|run| run.start < to)
+	}
+
 	fn base_code(&self, position: u64) -> u8 {
 		let word = self
 			.words

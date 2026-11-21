@@ -7,6 +7,7 @@ mod config;
 mod describe;
 mod error;
 mod extend;
+mod fast;
 mod hash;
 mod index;
 mod kernel;

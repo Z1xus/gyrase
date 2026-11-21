@@ -13,6 +13,7 @@ struct Syncmer {
 	position: u32,
 	hash: u64,
 	forward: bool,
+	reverse: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,6 +28,7 @@ pub(crate) struct Seed {
 pub(crate) struct Seeder {
 	config: SeedConfig,
 	syncmers: Vec<Syncmer>,
+	flipped: Vec<Syncmer>,
 }
 
 impl Seeder {
@@ -34,12 +36,44 @@ impl Seeder {
 		Self {
 			config,
 			syncmers: Vec::new(),
+			flipped: Vec::new(),
 		}
 	}
 
 	pub(crate) fn extract(&mut self, codes: &[u8], limit: u32, seeds: &mut Vec<Seed>) {
 		self.collect_syncmers(codes);
-		self.collect_seeds(limit, seeds);
+		collect_seeds(&self.config, &self.syncmers, limit, seeds);
+	}
+
+	pub(crate) fn syncmer_positions(
+		&mut self,
+		codes: &[u8],
+		limit: u32,
+	) -> impl Iterator<Item = u32> + '_ {
+		self.collect_syncmers(codes);
+		self.syncmers
+			.iter()
+			.take_while(move |syncmer| syncmer.position < limit)
+			.map(|syncmer| syncmer.position)
+	}
+
+	pub(crate) fn extract_both(&mut self, codes: &[u8], seeds: &mut [Vec<Seed>; 2]) {
+		self.collect_syncmers(codes);
+		self.flipped.clear();
+		let k = u32_of(self.config.k);
+		let length = u32_of(codes.len());
+		self.flipped
+			.extend(self.syncmers.iter().rev().map(|syncmer| Syncmer {
+				position: length - k - syncmer.position,
+				hash: syncmer.hash,
+				forward: syncmer.reverse,
+				reverse: syncmer.forward,
+			}));
+		let [forward, reverse] = seeds;
+		forward.clear();
+		reverse.clear();
+		collect_seeds(&self.config, &self.syncmers, u32::MAX, forward);
+		collect_seeds(&self.config, &self.flipped, u32::MAX, reverse);
 	}
 
 	fn collect_syncmers(&mut self, codes: &[u8]) {
@@ -89,45 +123,45 @@ impl Seeder {
 					position: u32_of(index + 1 - k),
 					hash: mix(forward_k.min(reverse_k)),
 					forward: forward_k <= reverse_k,
+					reverse: reverse_k <= forward_k,
 				});
 			}
 		}
 	}
+}
 
-	fn collect_seeds(&self, limit: u32, seeds: &mut Vec<Seed>) {
-		let SeedConfig { w_min, w_max, .. } = self.config;
-		for (index, first) in self.syncmers.iter().enumerate() {
-			if first.position >= limit {
-				break;
-			}
-			let reach = first.position + u32_of(MAX_STROBE_OFFSET);
-			let candidates = self
-				.syncmers
-				.iter()
-				.skip(index + w_min)
-				.take(w_max - w_min + 1)
-				.take_while(|candidate| candidate.position <= reach);
-			let mut second = first;
-			let mut fewest = u32::MAX;
-			for candidate in candidates {
-				let ones = ((first.hash ^ candidate.hash) & STROBE_SELECTION_MASK).count_ones();
-				if ones < fewest {
-					fewest = ones;
-					second = candidate;
-				}
-			}
-			seeds.push(Seed {
-				position: first.position,
-				offset: second.position - first.position,
-				key: (first.hash & !AUX_MASK) | (second.hash & AUX_MASK),
-				orientation: if first.forward { ORIENTATION_FIRST } else { 0 }
-					| if second.forward {
-						ORIENTATION_SECOND
-					} else {
-						0
-					},
-			});
+fn collect_seeds(config: &SeedConfig, syncmers: &[Syncmer], limit: u32, seeds: &mut Vec<Seed>) {
+	let SeedConfig { w_min, w_max, .. } = *config;
+	for (index, first) in syncmers.iter().enumerate() {
+		if first.position >= limit {
+			break;
 		}
+		let reach = first.position + u32_of(MAX_STROBE_OFFSET);
+		let candidates = syncmers
+			.iter()
+			.skip(index + w_min)
+			.take(w_max - w_min + 1)
+			.take_while(|candidate| candidate.position <= reach);
+		let mut second = first;
+		let mut fewest = u32::MAX;
+		for candidate in candidates {
+			let ones = ((first.hash ^ candidate.hash) & STROBE_SELECTION_MASK).count_ones();
+			if ones < fewest {
+				fewest = ones;
+				second = candidate;
+			}
+		}
+		seeds.push(Seed {
+			position: first.position,
+			offset: second.position - first.position,
+			key: (first.hash & !AUX_MASK) | (second.hash & AUX_MASK),
+			orientation: if first.forward { ORIENTATION_FIRST } else { 0 }
+				| if second.forward {
+					ORIENTATION_SECOND
+				} else {
+					0
+				},
+		});
 	}
 }
 

@@ -3,10 +3,7 @@ use std::ops::Range;
 use gyrase_genome::ContigId;
 
 use crate::alignment::Strand;
-use crate::config::Scoring;
 
-const MAX_UNGAPPED_MISMATCHES: i32 = 2;
-const END_MARGIN: usize = 10;
 const DUPLICATE_OVERLAP_DIVISOR: u32 = 2;
 
 #[derive(Debug, Clone)]
@@ -105,38 +102,4 @@ pub(crate) fn settle(
 		}
 		position += run;
 	}
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Ungapped {
-	pub(crate) score: i32,
-}
-
-pub(crate) fn ungapped(scoring: &Scoring, query: &[u8], reference: &[u8]) -> Option<Ungapped> {
-	if query.len() != reference.len() {
-		return None;
-	}
-	let mut mismatches = 0i32;
-	let mut interior = true;
-	for (index, (&q, &r)) in query.iter().zip(reference).enumerate() {
-		if q > 3 || r > 3 {
-			return None;
-		}
-		if q != r {
-			mismatches += 1;
-			if mismatches > MAX_UNGAPPED_MISMATCHES {
-				return None;
-			}
-			interior &= index >= END_MARGIN && index + END_MARGIN < query.len();
-		}
-	}
-	if mismatches == MAX_UNGAPPED_MISMATCHES && !interior {
-		return None;
-	}
-	let matched = i32::from(scoring.matched);
-	let penalty = matched + i32::from(scoring.mismatch);
-	let length = i32::try_from(query.len()).ok()?;
-	Some(Ungapped {
-		score: length * matched - mismatches * penalty,
-	})
 }

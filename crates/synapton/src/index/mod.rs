@@ -1,4 +1,5 @@
 mod build;
+mod certificate;
 mod entry;
 mod file;
 
@@ -11,7 +12,8 @@ use gyrase_io::Workers;
 
 use crate::Error;
 use crate::config::SeedConfig;
-use crate::reference::PackedReference;
+use crate::num::usize_of;
+use crate::reference::{PackedReference, WORD_BASES};
 use crate::seeding::Seed;
 
 pub(crate) use entry::{offset_of as entry_offset, position_of as entry_position};
@@ -23,6 +25,7 @@ pub struct Index {
 	filter_cutoff: u32,
 	buckets: Vec<u32>,
 	entries: Vec<u64>,
+	unique: Vec<u64>,
 	reference: PackedReference,
 }
 
@@ -91,6 +94,7 @@ impl Index {
 	pub fn heap_bytes(&self) -> usize {
 		size_of_val(self.entries.as_slice())
 			+ size_of_val(self.buckets.as_slice())
+			+ size_of_val(self.unique.as_slice())
 			+ size_of_val(self.reference.words())
 	}
 
@@ -102,6 +106,20 @@ impl Index {
 			range: start..end,
 			prefix: entry::prefix(tag, seed.orientation),
 		}
+	}
+
+	pub(crate) fn certified(&self, start: u64, length: usize) -> bool {
+		let first = start / WORD_BASES;
+		let last = (start + length as u64 - 1) / WORD_BASES;
+		(first..=last).all(|tile| {
+			self.unique
+				.get(usize_of(tile / 64))
+				.is_some_and(|word| word >> (tile % 64) & 1 == 1)
+		})
+	}
+
+	pub(crate) fn touch(&self, probe: &Probe) -> u64 {
+		self.entries.get(probe.range.start).copied().unwrap_or(0)
 	}
 
 	pub(crate) fn first_strobe_run(&self, probe: &Probe) -> impl Iterator<Item = u64> + '_ {

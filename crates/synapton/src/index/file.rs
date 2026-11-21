@@ -15,8 +15,8 @@ use crate::num::u32_of;
 use crate::reference::{ContigSpan, PackedReference};
 
 const MAGIC: [u8; 8] = *b"SYNAPTON";
-const VERSION: u32 = 2;
-const HEADER_LEN: usize = 128;
+const VERSION: u32 = 3;
+const HEADER_LEN: usize = 144;
 const HEADER_WORDS: usize = HEADER_LEN / 8;
 const READ_CHUNK_BYTES: usize = 4 << 20;
 const WRITE_CHUNK_WORDS: usize = 1 << 17;
@@ -41,6 +41,8 @@ struct Header {
 	words_checksum: u64,
 	buckets_checksum: u64,
 	entries_checksum: u64,
+	unique_count: u64,
+	unique_checksum: u64,
 }
 
 impl Header {
@@ -77,6 +79,8 @@ impl Header {
 			self.words_checksum,
 			self.buckets_checksum,
 			self.entries_checksum,
+			self.unique_count,
+			self.unique_checksum,
 		] {
 			put(&field.to_le_bytes());
 		}
@@ -131,6 +135,8 @@ impl Header {
 			words_checksum: reader.u64()?,
 			buckets_checksum: reader.u64()?,
 			entries_checksum: reader.u64()?,
+			unique_count: reader.u64()?,
+			unique_checksum: reader.u64()?,
 		})
 	}
 
@@ -146,8 +152,12 @@ impl Header {
 		self.buckets_offset() + self.bucket_count * 4
 	}
 
-	fn file_len(&self) -> u64 {
+	fn unique_offset(&self) -> u64 {
 		self.entries_offset() + self.entry_count * 8
+	}
+
+	fn file_len(&self) -> u64 {
+		self.unique_offset() + self.unique_count * 8
 	}
 
 	fn validate_sizes(&self, file_len: u64) -> Result<(), Error> {
@@ -155,6 +165,7 @@ impl Header {
 			&& self.word_count < (1 << 40)
 			&& self.bucket_count < (1 << 40)
 			&& self.entry_count < (1 << 40)
+			&& self.unique_count < (1 << 40)
 			&& self.meta_len < (1 << 40);
 		if !sane {
 			return Err(Error::CorruptIndex("section sizes"));
@@ -300,13 +311,15 @@ fn checksum_u32s(values: &[u32]) -> u64 {
 
 pub(super) fn save(index: &Index, path: &Path, workers: &Workers) -> Result<(), Error> {
 	let meta = encode_meta(&index.reference);
-	let (words_checksum, buckets_checksum, entries_checksum) = workers.install(|| {
-		(
-			checksum_words(index.reference.words()),
-			checksum_u32s(&index.buckets),
-			checksum_words(&index.entries),
-		)
-	});
+	let (words_checksum, buckets_checksum, entries_checksum, unique_checksum) =
+		workers.install(|| {
+			(
+				checksum_words(index.reference.words()),
+				checksum_u32s(&index.buckets),
+				checksum_words(&index.entries),
+				checksum_words(&index.unique),
+			)
+		});
 	let header = Header {
 		config: index.config,
 		bucket_bits: index.bucket_bits,
@@ -321,6 +334,8 @@ pub(super) fn save(index: &Index, path: &Path, workers: &Workers) -> Result<(), 
 		words_checksum,
 		buckets_checksum,
 		entries_checksum,
+		unique_count: index.unique.len() as u64,
+		unique_checksum,
 	};
 	let (partial, file) = Partial::create(path)?;
 	let mut writer = BufWriter::with_capacity(8 << 20, file);
@@ -329,6 +344,7 @@ pub(super) fn save(index: &Index, path: &Path, workers: &Workers) -> Result<(), 
 	write_u64s(&mut writer, index.reference.words())?;
 	write_u32s(&mut writer, &index.buckets)?;
 	write_u64s(&mut writer, &index.entries)?;
+	write_u64s(&mut writer, &index.unique)?;
 	writer
 		.into_inner()
 		.map_err(io::IntoInnerError::into_error)?
@@ -379,11 +395,9 @@ fn read_meta(file: &File, header: &Header) -> Result<Meta, Error> {
 	decode_meta(&meta)
 }
 
-fn read_tables(
-	file: &File,
-	header: &Header,
-	workers: &Workers,
-) -> Result<(Vec<u32>, Vec<u64>), Error> {
+type Tables = (Vec<u32>, Vec<u64>, Vec<u64>);
+
+fn read_tables(file: &File, header: &Header, workers: &Workers) -> Result<Tables, Error> {
 	let buckets = read_u32s(
 		file,
 		header.buckets_offset(),
@@ -396,10 +410,17 @@ fn read_tables(
 		usize::try_from(header.entry_count)?,
 		workers,
 	)?;
-	let (buckets_ok, entries_ok) = workers.install(|| {
+	let unique = read_u64s(
+		file,
+		header.unique_offset(),
+		usize::try_from(header.unique_count)?,
+		workers,
+	)?;
+	let (buckets_ok, entries_ok, unique_ok) = workers.install(|| {
 		(
 			checksum_u32s(&buckets) == header.buckets_checksum,
 			checksum_words(&entries) == header.entries_checksum,
+			checksum_words(&unique) == header.unique_checksum,
 		)
 	});
 	if !buckets_ok {
@@ -408,7 +429,10 @@ fn read_tables(
 	if !entries_ok {
 		return Err(Error::IndexChecksum("entries"));
 	}
-	Ok((buckets, entries))
+	if !unique_ok {
+		return Err(Error::IndexChecksum("certificate"));
+	}
+	Ok((buckets, entries, unique))
 }
 
 pub(super) fn load(path: &Path, workers: &Workers) -> Result<Index, Error> {
@@ -433,13 +457,14 @@ pub(super) fn load(path: &Path, workers: &Workers) -> Result<Index, Error> {
 	if reference.checksum() != header.reference_checksum {
 		return Err(Error::IndexChecksum("reference identity"));
 	}
-	let (buckets, entries) = read_tables(&file, &header, workers)?;
+	let (buckets, entries, unique) = read_tables(&file, &header, workers)?;
 	Ok(Index {
 		config: header.config,
 		bucket_bits: header.bucket_bits,
 		filter_cutoff: header.filter_cutoff,
 		buckets,
 		entries,
+		unique,
 		reference,
 	})
 }
@@ -456,7 +481,7 @@ pub(super) fn reuse(
 	if header.reference_checksum != reference.checksum() || header.config != config {
 		return Reuse::Stale(reference);
 	}
-	let Ok((buckets, entries)) = read_tables(&file, &header, workers) else {
+	let Ok((buckets, entries, unique)) = read_tables(&file, &header, workers) else {
 		return Reuse::Stale(reference);
 	};
 	Reuse::Loaded(Box::new(Index {
@@ -465,6 +490,7 @@ pub(super) fn reuse(
 		filter_cutoff: header.filter_cutoff,
 		buckets,
 		entries,
+		unique,
 		reference,
 	}))
 }

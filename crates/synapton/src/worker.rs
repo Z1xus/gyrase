@@ -6,18 +6,20 @@ use crate::alignment::{
 	AlignedBatch, Alignment, CigarKind, CigarOp, End, Flag, FlagSet, Mate, MateLocation, Placement,
 	ReadId, Record, Strand,
 };
-use crate::candidate::{Candidate, settle, ungapped};
+use crate::candidate::{Candidate, settle};
 use crate::chain::Chain;
 use crate::config::AlignConfig;
 use crate::describe::{self, describe};
 use crate::extend::{ExtensionBatch, ExtensionResults, Outcome};
+use crate::fast;
 use crate::index::Index;
 use crate::kernel::{self, CpuScratch};
-use crate::mapper::Mapper;
+use crate::mapper::{Diagonal, Mapper};
 use crate::mapq;
 use crate::nucleotide::encode;
 use crate::num::{i32_of, i64_len, i64_of, u32_of, u64_of, usize_of};
 use crate::pairing::{self, InsertModel, PairChoice};
+use crate::reference::ContigSpan;
 use crate::rescue::Voter;
 
 const MAX_EXTENSIONS: usize = 6;
@@ -31,6 +33,8 @@ const MIN_NEW_BASES: u32 = 20;
 const UNIQUE_MARGIN: i32 = 10;
 const MAX_MATE_BOOST: u8 = 40;
 const MIN_PAIRED_SCORE: i32 = 19;
+const MIN_FAST_LENGTH: usize = 64;
+const FAST_DIAGONALS: usize = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Layout<'m> {
@@ -42,6 +46,17 @@ pub(crate) enum Layout<'m> {
 struct Query {
 	start: usize,
 	length: usize,
+	packed: usize,
+	clean: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Placed {
+	strand: Strand,
+	contig: ContigId,
+	span: ContigSpan,
+	flat: i64,
+	score: i32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -85,7 +100,10 @@ pub(crate) struct Worker<'a> {
 	mapper: Mapper<'a>,
 	voter: Voter,
 	chains: Vec<Chain>,
+	diagonals: Vec<Diagonal>,
+	done: Vec<bool>,
 	codes: Vec<u8>,
+	packed: Vec<u64>,
 	queries: Vec<Query>,
 	repeats: Vec<f32>,
 	candidates: Vec<Candidate>,
@@ -109,7 +127,10 @@ impl<'a> Worker<'a> {
 			mapper: Mapper::new(index, &config),
 			voter: Voter::default(),
 			chains: Vec::new(),
+			diagonals: Vec::new(),
+			done: Vec::new(),
 			codes: Vec::new(),
+			packed: Vec::new(),
 			queries: Vec::new(),
 			repeats: Vec::new(),
 			candidates: Vec::new(),
@@ -132,15 +153,19 @@ impl<'a> Worker<'a> {
 		first_read: u32,
 		out: &mut AlignedBatch,
 	) {
-		self.seed_and_extend(sequences);
-		if let Layout::Paired(model) = layout {
+		let model = match layout {
+			Layout::Paired(model) => Some(model),
+			Layout::Single => None,
+		};
+		self.seed_and_extend(sequences, model);
+		if let Some(model) = model {
 			self.rescue(model);
 		}
 		self.emit(layout, first_read, out);
 	}
 
 	pub(crate) fn distances(&mut self, sequences: &[&[u8]], out: &mut Vec<i64>) {
-		self.seed_and_extend(sequences);
+		self.seed_and_extend(sequences, None);
 		for pair in 0..sequences.len() / 2 {
 			let (Some(first), Some(second)) = (self.list(2 * pair), self.list(2 * pair + 1)) else {
 				continue;
@@ -165,12 +190,19 @@ impl<'a> Worker<'a> {
 		}
 	}
 
-	fn seed_and_extend(&mut self, sequences: &[&[u8]]) {
+	fn seed_and_extend(&mut self, sequences: &[&[u8]], fast: Option<&InsertModel>) {
 		self.load(sequences);
 		self.candidates.clear();
 		self.operations.clear();
 		self.batch.clear();
 		self.pending.clear();
+		self.done.clear();
+		self.done.resize(self.queries.len(), false);
+		if let Some(model) = fast {
+			for pair in 0..self.queries.len() / 2 {
+				self.fast_pair(pair, model);
+			}
+		}
 		self.generate();
 		self.extend_pending();
 		settle(&mut self.candidates, &mut self.ranges, self.queries.len());
@@ -178,6 +210,7 @@ impl<'a> Worker<'a> {
 
 	fn load(&mut self, sequences: &[&[u8]]) {
 		self.codes.clear();
+		self.packed.clear();
 		self.queries.clear();
 		for sequence in sequences {
 			let start = self.codes.len();
@@ -187,7 +220,17 @@ impl<'a> Worker<'a> {
 				let code = self.codes.get(start + offset).copied().unwrap_or(4);
 				self.codes.push(if code < 4 { 3 - code } else { code });
 			}
-			self.queries.push(Query { start, length });
+			let packed = self.packed.len();
+			let forward = self.codes.get(start..start + length).unwrap_or_default();
+			let clean = fast::pack(forward, &mut self.packed);
+			let reverse = self.codes.get(start + length..).unwrap_or_default();
+			fast::pack(reverse, &mut self.packed);
+			self.queries.push(Query {
+				start,
+				length,
+				packed,
+				clean,
+			});
 		}
 	}
 
@@ -201,13 +244,18 @@ impl<'a> Worker<'a> {
 			let Some(&query) = self.queries.get(end) else {
 				break;
 			};
+			if self.done.get(end).copied().unwrap_or(false) {
+				self.repeats.push(0.0);
+				continue;
+			}
 			let codes = std::mem::take(&mut self.codes);
+			let packed = std::mem::take(&mut self.packed);
 			let start = query.start;
 			let forward = codes.get(start..start + query.length).unwrap_or_default();
 			let reverse = codes
 				.get(start + query.length..start + 2 * query.length)
 				.unwrap_or_default();
-			let mapped = self.mapper.chains(forward, reverse, &mut self.chains);
+			let mapped = self.mapper.chains(forward, &mut self.chains);
 			self.repeats.push(mapped.repeat_fraction);
 			let best = self.chains.first().map_or(0.0, |chain| chain.score);
 			let chains = std::mem::take(&mut self.chains);
@@ -216,26 +264,189 @@ impl<'a> Worker<'a> {
 				.take(MAX_EXTENSIONS)
 				.filter(|chain| chain.score >= EXTEND_FRACTION * best)
 			{
-				let codes_for = match chain.strand {
-					Strand::Forward => forward,
-					Strand::Reverse => reverse,
+				let (codes_for, packed_for) = match chain.strand {
+					Strand::Forward => (forward, packed_slice(&packed, query, Strand::Forward)),
+					Strand::Reverse => (reverse, packed_slice(&packed, query, Strand::Reverse)),
 				};
-				self.place_chain(u32_of(end), chain, codes_for);
+				self.place_chain(u32_of(end), chain, codes_for, packed_for, query.clean);
 			}
 			self.chains = chains;
 			self.codes = codes;
+			self.packed = packed;
 		}
 	}
 
-	fn place_chain(&mut self, owner: u32, chain: &Chain, query: &[u8]) {
+	fn place_unique(&mut self, end: usize) -> Option<Placed> {
+		let query = *self.queries.get(end)?;
+		if !query.clean || query.length < MIN_FAST_LENGTH {
+			return None;
+		}
+		let forward = self.codes.get(query.start..query.start + query.length)?;
+		self.mapper.locate(forward, &mut self.diagonals);
+		let reference = self.index.reference();
+		for diagonal in self.diagonals.iter().take(FAST_DIAGONALS) {
+			let Ok(start) = u64::try_from(diagonal.start) else {
+				continue;
+			};
+			let Some((contig, &span)) = reference.locate(start) else {
+				continue;
+			};
+			let read = packed_slice(&self.packed, query, diagonal.strand);
+			let Some(score) = fast::ungapped(
+				reference,
+				&self.config.scoring,
+				&span,
+				diagonal.start,
+				read,
+				query.length,
+			) else {
+				continue;
+			};
+			if self.index.certified(start, query.length) {
+				return Some(Placed {
+					strand: diagonal.strand,
+					contig,
+					span,
+					flat: diagonal.start,
+					score,
+				});
+			}
+		}
+		None
+	}
+
+	fn find_mate(
+		&self,
+		anchor: &Placed,
+		anchor_end: usize,
+		end: usize,
+		model: &InsertModel,
+	) -> Option<Placed> {
+		let query = *self.queries.get(end)?;
+		if !query.clean || query.length < MIN_FAST_LENGTH {
+			return None;
+		}
+		let anchor_length = i64_len(self.queries.get(anchor_end)?.length);
+		let length = i64_len(query.length);
+		let (low, high) = model.window();
+		let (from, to) = match anchor.strand {
+			Strand::Forward => (
+				(anchor.flat + low - length).max(anchor.flat - 1),
+				anchor.flat + high - length,
+			),
+			Strand::Reverse => (
+				anchor.flat + anchor_length - high,
+				(anchor.flat + anchor_length - low).min(anchor.flat + 1),
+			),
+		};
+		let (from, to) = (
+			from.max(i64_of(anchor.span.start)),
+			to.min(i64_of(anchor.span.end()) - length),
+		);
+		let strand = match anchor.strand {
+			Strand::Forward => Strand::Reverse,
+			Strand::Reverse => Strand::Forward,
+		};
+		let read = packed_slice(&self.packed, query, strand);
+		let reference = self.index.reference();
+		let (flat, score) = fast::scan(
+			reference,
+			&self.config.scoring,
+			&anchor.span,
+			(from, to),
+			read,
+			query.length,
+		)?;
+		self.index
+			.certified(u64_of(flat), query.length)
+			.then_some(Placed {
+				strand,
+				contig: anchor.contig,
+				span: anchor.span,
+				flat,
+				score,
+			})
+	}
+
+	fn fast_pair(&mut self, pair: usize, model: &InsertModel) {
+		for (first, second) in [(2 * pair, 2 * pair + 1), (2 * pair + 1, 2 * pair)] {
+			let Some(anchor) = self.place_unique(first) else {
+				continue;
+			};
+			let Some(mate) = self.find_mate(&anchor, first, second, model) else {
+				continue;
+			};
+			let (Some(first_length), Some(second_length)) = (
+				self.queries.get(first).map(|query| query.length),
+				self.queries.get(second).map(|query| query.length),
+			) else {
+				return;
+			};
+			let first_candidate = Self::fast_candidate(first, &anchor, first_length);
+			let second_candidate = Self::fast_candidate(second, &mate, second_length);
+			let proper = pairing::distance(&first_candidate, &second_candidate)
+				.is_some_and(|span| model.contains(span));
+			if !proper {
+				return;
+			}
+			for (end, candidate, length) in [
+				(first, first_candidate, first_length),
+				(second, second_candidate, second_length),
+			] {
+				let operations =
+					self.push_operations(&[CigarOp::new(CigarKind::Match, u32_of(length))]);
+				self.candidates.push(Candidate {
+					operations,
+					..candidate
+				});
+				self.done[end] = true;
+			}
+			return;
+		}
+	}
+
+	fn fast_candidate(end: usize, placed: &Placed, length: usize) -> Candidate {
+		let local = u32_of(usize_of(u64_of(placed.flat) - placed.span.start));
+		Candidate {
+			owner: u32_of(end),
+			strand: placed.strand,
+			contig: placed.contig,
+			start: local,
+			stop: local + u32_of(length),
+			query_start: 0,
+			query_stop: u32_of(length),
+			score: placed.score,
+			operations: 0..0,
+		}
+	}
+
+	fn place_chain(
+		&mut self,
+		owner: u32,
+		chain: &Chain,
+		query: &[u8],
+		packed: &[u64],
+		clean: bool,
+	) {
 		let reference = self.index.reference();
 		let Some((contig, span)) = reference.locate(chain.reference_start) else {
 			return;
 		};
 		let span_start = span.start;
 		let start = chain.diagonal_middle;
-		reference.window(span, start, query.len(), &mut self.window);
-		if let Some(found) = ungapped(&self.config.scoring, query, &self.window) {
+		let found = clean
+			.then(|| {
+				fast::ungapped(
+					reference,
+					&self.config.scoring,
+					span,
+					start,
+					packed,
+					query.len(),
+				)
+			})
+			.flatten();
+		if let Some(found) = found {
 			let local = u64_of(start - i64_of(span_start));
 			let operations =
 				self.push_operations(&[CigarOp::new(CigarKind::Match, u32_of(query.len()))]);
@@ -247,7 +458,7 @@ impl<'a> Worker<'a> {
 				stop: u32_of(usize_of(local)) + u32_of(query.len()),
 				query_start: 0,
 				query_stop: u32_of(query.len()),
-				score: found.score,
+				score: found,
 				operations,
 			});
 			return;
@@ -338,6 +549,9 @@ impl<'a> Worker<'a> {
 		model: &InsertModel,
 		bounds: (i64, i64),
 	) {
+		if self.done.get(anchor_end).copied().unwrap_or(false) {
+			return;
+		}
 		let (Some(anchors), Some(mates), Some(&mate_query)) = (
 			self.list(anchor_end),
 			self.list(mate_end),
@@ -741,6 +955,12 @@ fn extra_flags(flags: FlagSet, kind: Flag) -> FlagSet {
 		Flag::Secondary => flags.without(Flag::ProperPair).with(kind),
 		_ => flags.with(kind),
 	}
+}
+
+fn packed_slice(packed: &[u64], query: Query, strand: Strand) -> &[u64] {
+	let words = query.length.div_ceil(32);
+	let from = query.packed + strand.index() * words;
+	packed.get(from..from + words).unwrap_or_default()
 }
 
 fn strand_slice(codes: &[u8], query: Query, strand: Strand) -> &[u8] {

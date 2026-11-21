@@ -4,6 +4,7 @@ use gyrase_io::Workers;
 use rayon::prelude::*;
 
 use super::Index;
+use super::certificate;
 use super::entry::{self, MAX_BUCKET_BITS};
 use crate::Error;
 use crate::config::{MAX_STROBE_OFFSET, SeedConfig};
@@ -144,12 +145,14 @@ pub(super) fn build(
 	let histogram = workers.install(|| sort_buckets(&mut entries, &buckets));
 	stopped()?;
 	let filter_cutoff = filter_cutoff(&histogram);
+	let unique = certificate::build(&reference, config, workers, stop)?;
 	Ok(Index {
 		config,
 		bucket_bits,
 		filter_cutoff,
 		buckets,
 		entries,
+		unique,
 		reference,
 	})
 }
