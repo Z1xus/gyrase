@@ -1,13 +1,14 @@
 use std::io::{Cursor, Read};
 
-use gyrase_genome::Base;
+use gyrase_genome::{Base, Chromosome};
 use gyrase_io::{Workers, decode};
 
 use super::bytes::{Bytes, unzigzag};
 use super::write::{ALLELE_SHIFT, MAGIC, ORIENTATION_BIT, RESERVED_BITS, VERSION};
 use super::{MAX_SITES, Panel};
+
 use crate::site::NameCode;
-use crate::{Chip, ChipSet, Chrom, Error, Orientation, Site};
+use crate::{Chip, ChipSet, Error, Orientation, Site};
 
 const EMBEDDED: &[u8] = include_bytes!("../../data/panel.bgz");
 const MAX_PANEL_BYTES: u64 = 256 << 20;
@@ -69,7 +70,7 @@ impl Panel {
 				.map_err(|_| Error::Corrupt("name encoding"))?;
 			names.push(Box::from(name));
 		}
-		let mut counts = [0usize; Chrom::COUNT];
+		let mut counts = [0usize; Chromosome::COUNT];
 		let mut total = 0usize;
 		for count in &mut counts {
 			*count = bytes.length()?;
@@ -93,8 +94,9 @@ impl Panel {
 		}
 		let mut sites = Vec::with_capacity(site_count);
 		let mut offset = 0i64;
-		for (chrom_index, count) in counts.into_iter().enumerate() {
-			let chrom = Chrom::from_index(chrom_index).ok_or(Error::Corrupt("chromosome"))?;
+		for (chromosome_index, count) in counts.into_iter().enumerate() {
+			let chromosome =
+				Chromosome::from_index(chromosome_index).ok_or(Error::Corrupt("chromosome"))?;
 			let mut grch38 = 0u32;
 			for _ in 0..count {
 				let delta = u32::try_from(positions.varint()?)
@@ -118,7 +120,7 @@ impl Panel {
 					Orientation::Opposite
 				};
 				sites.push(Site {
-					chrom,
+					chromosome,
 					grch37,
 					grch38,
 					name,

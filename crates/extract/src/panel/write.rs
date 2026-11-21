@@ -1,11 +1,12 @@
 use std::io::Write;
 
-use gyrase_genome::Base;
+use gyrase_genome::{Base, Chromosome};
 
 use super::bytes::{put_varint, zigzag};
 use super::{MAX_NAME_LEN, Panel};
+
 use crate::site::NameCode;
-use crate::{Chip, Chrom, Error, Orientation};
+use crate::{Chip, Error, Orientation};
 
 pub(super) const MAGIC: [u8; 8] = *b"GYRPANEL";
 pub(super) const VERSION: u16 = 1;
@@ -42,9 +43,9 @@ impl Panel {
 			head.push(len);
 			head.extend_from_slice(name.as_bytes());
 		}
-		let mut counts = [0u32; Chrom::COUNT];
+		let mut counts = [0u32; Chromosome::COUNT];
 		for site in &self.sites {
-			if let Some(count) = counts.get_mut(site.chrom.index()) {
+			if let Some(count) = counts.get_mut(site.chromosome.index()) {
 				*count += 1;
 			}
 		}
@@ -66,12 +67,12 @@ impl Panel {
 		let mut names = Vec::new();
 		let mut alleles = Vec::with_capacity(self.sites.len());
 		let mut chips = Vec::with_capacity(self.sites.len() * 2);
-		let mut previous_chrom = None;
+		let mut previous_chromosome = None;
 		let mut previous_position = 0u32;
 		let mut previous_offset = 0i64;
 		for site in &self.sites {
-			if previous_chrom != Some(site.chrom) {
-				previous_chrom = Some(site.chrom);
+			if previous_chromosome != Some(site.chromosome) {
+				previous_chromosome = Some(site.chromosome);
 				previous_position = 0;
 			}
 			let delta = site

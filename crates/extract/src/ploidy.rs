@@ -1,6 +1,6 @@
-use crate::{Chrom, Sex};
+use gyrase_genome::{Build, Chromosome};
 
-const X_PAR_GRCH37: [(u32, u32); 2] = [(60_001, 2_699_520), (154_931_044, 155_260_560)];
+use crate::Sex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ploidy {
@@ -10,16 +10,17 @@ pub enum Ploidy {
 }
 
 pub fn in_x_par(grch37: u32) -> bool {
-	X_PAR_GRCH37
+	Build::Grch37
+		.pseudoautosomal()
 		.iter()
-		.any(|&(start, end)| (start..=end).contains(&grch37))
+		.any(|range| range.contains(&(u64::from(grch37) - 1)))
 }
 
-pub fn expected_ploidy(sex: Sex, chrom: Chrom, grch37: u32) -> Ploidy {
-	match (chrom, sex) {
-		(Chrom::MT, _) | (Chrom::Y, Sex::Male) => Ploidy::Haploid,
-		(Chrom::X, Sex::Male) if !in_x_par(grch37) => Ploidy::Haploid,
-		(Chrom::Y, Sex::Female) => Ploidy::Absent,
+pub fn expected_ploidy(sex: Sex, chromosome: Chromosome, grch37: u32) -> Ploidy {
+	match (chromosome, sex) {
+		(Chromosome::Mitochondrion, _) | (Chromosome::Y, Sex::Male) => Ploidy::Haploid,
+		(Chromosome::X, Sex::Male) if !in_x_par(grch37) => Ploidy::Haploid,
+		(Chromosome::Y, Sex::Female) => Ploidy::Absent,
 		_ => Ploidy::Diploid,
 	}
 }

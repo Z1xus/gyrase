@@ -1,7 +1,9 @@
 use std::io::{self, Write};
 
+use gyrase_genome::Chromosome;
+
 use super::layout::{Layout, Resolved, doubled_or_ordered};
-use crate::{Chrom, Site, SiteName, Timestamp, in_x_par};
+use crate::{Site, SiteName, Timestamp, in_x_par};
 
 pub(super) struct FamilyFinder;
 
@@ -12,7 +14,7 @@ impl Layout for FamilyFinder {
 
 	fn sort_key(&self, site: &Site) -> (u8, u32) {
 		(
-			u8::try_from(site.chrom().index()).unwrap_or(u8::MAX),
+			u8::try_from(site.chromosome().index()).unwrap_or(u8::MAX),
 			site.grch37(),
 		)
 	}
@@ -24,10 +26,10 @@ impl Layout for FamilyFinder {
 		site: &Site,
 		genotype: Resolved,
 	) -> io::Result<()> {
-		let label = if site.chrom() == Chrom::X && in_x_par(site.grch37()) {
+		let label = if site.chromosome() == Chromosome::X && in_x_par(site.grch37()) {
 			"XY"
 		} else {
-			site.chrom().label()
+			site.chromosome().label()
 		};
 		write!(sink, "{name},{label},{},", site.grch37())?;
 		sink.write_all(&doubled_or_ordered(genotype).unwrap_or(*b"--"))?;

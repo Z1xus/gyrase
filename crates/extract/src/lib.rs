@@ -1,6 +1,5 @@
 mod call;
 mod chip;
-mod chrom;
 mod error;
 mod export;
 mod panel;
@@ -11,7 +10,6 @@ mod timestamp;
 
 pub use call::{Allele, CallThresholds, Genotype, SiteCall};
 pub use chip::{Chip, ChipSet};
-pub use chrom::Chrom;
 pub use error::Error;
 pub use export::{CallBuild, Format, Settings, Summary, write_raw_data};
 pub use panel::Panel;

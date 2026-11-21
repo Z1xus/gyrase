@@ -18,7 +18,7 @@ impl Layout for LivingDna {
 
 	fn sort_key(&self, site: &Site) -> (u8, u32) {
 		(
-			u8::try_from(site.chrom().index()).unwrap_or(u8::MAX),
+			u8::try_from(site.chromosome().index()).unwrap_or(u8::MAX),
 			site.grch37(),
 		)
 	}
@@ -33,7 +33,7 @@ impl Layout for LivingDna {
 		write!(
 			sink,
 			"{name}\t{}\t{}\t",
-			site.chrom().label(),
+			site.chromosome().label(),
 			site.grch37()
 		)?;
 		sink.write_all(&doubled_or_ordered(genotype).unwrap_or(*b"--"))?;

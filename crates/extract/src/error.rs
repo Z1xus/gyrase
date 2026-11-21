@@ -18,10 +18,10 @@ pub enum Error {
 	TooManySites(usize),
 	#[error("invalid site name {0:?}")]
 	InvalidName(String),
-	#[error("duplicate site {name} at {chrom}:{position}")]
+	#[error("duplicate site {name} at {chromosome}:{position}")]
 	DuplicateSite {
 		name: String,
-		chrom: &'static str,
+		chromosome: &'static str,
 		position: u32,
 	},
 	#[error("expected {expected} calls, got {actual}")]

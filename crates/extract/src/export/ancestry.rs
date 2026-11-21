@@ -1,7 +1,9 @@
 use std::io::{self, Write};
 
+use gyrase_genome::Chromosome;
+
 use super::layout::{Layout, Resolved};
-use crate::{Allele, Chrom, Site, SiteName, Timestamp, in_x_par};
+use crate::{Allele, Site, SiteName, Timestamp, in_x_par};
 
 pub(super) struct Ancestry;
 
@@ -13,12 +15,12 @@ const MT_NUMBER: u8 = 26;
 const HEADER_AFTER_TIMESTAMP: &str = "\r\n#Data was collected using AncestryDNA array version: V2.0\r\n#Data is formatted using AncestryDNA converter version: V1.0\r\n#Below is a text version of your DNA file from Ancestry.com DNA, LLC.  THIS \r\n#INFORMATION IS FOR YOUR PERSONAL USE AND IS INTENDED FOR GENEALOGICAL RESEARCH \r\n#ONLY.  IT IS NOT INTENDED FOR MEDICAL, DIAGNOSTIC, OR HEALTH PURPOSES.  THE EXPORTED DATA IS \r\n#SUBJECT TO THE ANCESTRY TERMS AND CONDITIONS, BUT PLEASE BE AWARE THAT THE \r\n#DOWNLOADED DATA WILL NO LONGER BE PROTECTED BY OUR SECURITY MEASURES.\r\n#WHEN YOU DOWNLOAD YOUR RAW DNA DATA, YOU ASSUME ALL RISK OF STORING, \r\n#SECURING AND PROTECTING YOUR DATA.  FOR MORE INFORMATION, SEE ANCESTRYDNA FAQS. \r\n#\r\n#Genetic data is provided below as five TAB delimited columns.  Each line \r\n#corresponds to a SNP.  Column one provides the SNP identifier (rsID where \r\n#possible).  Columns two and three contain the chromosome and basepair position \r\n#of the SNP using human reference build 37.1 coordinates.  Columns four and five \r\n#contain the two alleles observed at this SNP (genotype).  The genotype is reported \r\n#on the forward (+) strand with respect to the human reference.\r\nrsid\tchromosome\tposition\tallele1\tallele2\r\n";
 
 fn chromosome_number(site: &Site) -> u8 {
-	match site.chrom() {
-		Chrom::X if in_x_par(site.grch37()) => X_PAR_NUMBER,
-		Chrom::X => X_NUMBER,
-		Chrom::Y => Y_NUMBER,
-		Chrom::MT => MT_NUMBER,
-		other => other.autosome_number().unwrap_or(u8::MAX),
+	match site.chromosome() {
+		Chromosome::X if in_x_par(site.grch37()) => X_PAR_NUMBER,
+		Chromosome::X => X_NUMBER,
+		Chromosome::Y => Y_NUMBER,
+		Chromosome::Mitochondrion => MT_NUMBER,
+		Chromosome::Autosome(number) => number,
 	}
 }
 

@@ -25,8 +25,8 @@ impl Panel {
 			return Err(Error::TooManySites(MAX_SITES));
 		}
 		entries.sort_by(|left, right| {
-			let left_key = (left.chrom, left.grch38.unwrap_or(0), left.grch37);
-			let right_key = (right.chrom, right.grch38.unwrap_or(0), right.grch37);
+			let left_key = (left.chromosome, left.grch38.unwrap_or(0), left.grch37);
+			let right_key = (right.chromosome, right.grch38.unwrap_or(0), right.grch37);
 			left_key
 				.cmp(&right_key)
 				.then_with(|| left.name.cmp(&right.name))
@@ -39,10 +39,10 @@ impl Panel {
 			if entry.name.is_empty() || entry.name.len() > MAX_NAME_LEN {
 				return Err(Error::InvalidName(entry.name.clone()));
 			}
-			if !seen.insert((entry.chrom, entry.grch37, entry.name.as_str())) {
+			if !seen.insert((entry.chromosome, entry.grch37, entry.name.as_str())) {
 				return Err(Error::DuplicateSite {
 					name: entry.name.clone(),
-					chrom: entry.chrom.label(),
+					chromosome: entry.chromosome.label(),
 					position: entry.grch37,
 				});
 			}
@@ -51,7 +51,7 @@ impl Panel {
 				None => NameCode::Named(intern(&mut interned, &mut names, &entry.name)?),
 			};
 			sites.push(Site {
-				chrom: entry.chrom,
+				chromosome: entry.chromosome,
 				grch37: entry.grch37,
 				grch38: entry.grch38.unwrap_or(0),
 				name,

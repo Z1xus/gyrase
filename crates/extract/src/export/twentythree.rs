@@ -18,7 +18,7 @@ impl Layout for TwentyThree {
 
 	fn sort_key(&self, site: &Site) -> (u8, u32) {
 		(
-			u8::try_from(site.chrom().index()).unwrap_or(u8::MAX),
+			u8::try_from(site.chromosome().index()).unwrap_or(u8::MAX),
 			site.grch37(),
 		)
 	}
@@ -33,7 +33,7 @@ impl Layout for TwentyThree {
 		write!(
 			sink,
 			"{name}\t{}\t{}\t",
-			site.chrom().label(),
+			site.chromosome().label(),
 			site.grch37()
 		)?;
 		match genotype {

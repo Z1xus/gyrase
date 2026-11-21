@@ -15,7 +15,7 @@ pub(super) fn resolve(call: &SiteCall, site: &Site, settings: &Settings) -> Reso
 			site.orientation() == crate::Orientation::Opposite
 		}
 	};
-	let ploidy = expected_ploidy(settings.sex, site.chrom(), site.grch37());
+	let ploidy = expected_ploidy(settings.sex, site.chromosome(), site.grch37());
 	apply_ploidy(call.genotype, ploidy, flip)
 }
 

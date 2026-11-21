@@ -1,8 +1,8 @@
 use std::fmt;
 
-use gyrase_genome::Base;
+use gyrase_genome::{Base, Chromosome};
 
-use crate::{ChipSet, Chrom};
+use crate::ChipSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Orientation {
@@ -18,7 +18,7 @@ pub(crate) enum NameCode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Site {
-	pub(crate) chrom: Chrom,
+	pub(crate) chromosome: Chromosome,
 	pub(crate) grch37: u32,
 	pub(crate) grch38: u32,
 	pub(crate) name: NameCode,
@@ -29,8 +29,8 @@ pub struct Site {
 }
 
 impl Site {
-	pub const fn chrom(&self) -> Chrom {
-		self.chrom
+	pub const fn chromosome(&self) -> Chromosome {
+		self.chromosome
 	}
 
 	pub const fn grch37(&self) -> u32 {
@@ -65,7 +65,7 @@ impl Site {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SiteEntry {
 	pub name: String,
-	pub chrom: Chrom,
+	pub chromosome: Chromosome,
 	pub grch37: u32,
 	pub grch38: Option<u32>,
 	pub orientation: Orientation,
