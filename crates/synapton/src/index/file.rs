@@ -15,7 +15,7 @@ use crate::num::u32_of;
 use crate::reference::{ContigSpan, PackedReference};
 
 const MAGIC: [u8; 8] = *b"SYNAPTON";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 const HEADER_LEN: usize = 144;
 const HEADER_WORDS: usize = HEADER_LEN / 8;
 const READ_CHUNK_BYTES: usize = 4 << 20;

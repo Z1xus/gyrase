@@ -92,7 +92,10 @@ pub(super) fn build(
 		for run in found.chunk_by(|left, right| left.0 == right.0) {
 			if run.len() > 1 {
 				for &(_, position) in run {
-					mark(&repeated, u64::from(position) / WORD_BASES);
+					let start = u64::from(position);
+					for tile in start / WORD_BASES..=(start + overlap - 1) / WORD_BASES {
+						mark(&repeated, tile);
+					}
 				}
 			}
 		}
