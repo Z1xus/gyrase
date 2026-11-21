@@ -35,6 +35,7 @@ struct Pipeline {
 	ready: Receiver<Result<RecordBatch, Error>>,
 	recycle: SyncSender<RecordBatch>,
 	thread: Option<JoinHandle<()>>,
+	workers: Workers,
 }
 
 #[derive(Debug)]
@@ -62,7 +63,7 @@ impl BamReader {
 			Filter::Everything,
 			reference_count(&header),
 		);
-		Ok(Self::assemble(header, batches.spawn()))
+		Ok(Self::assemble(header, batches.spawn(workers)))
 	}
 
 	pub fn query(
@@ -87,7 +88,7 @@ impl BamReader {
 			Filter::Intervals(intervals),
 			reference_count(&header),
 		);
-		Ok(Self::assemble(header, batches.spawn()))
+		Ok(Self::assemble(header, batches.spawn(workers)))
 	}
 
 	pub fn read_header(file: &File, workers: &Workers) -> Result<Header, Error> {
@@ -140,7 +141,7 @@ impl Drop for Pipeline {
 		let (_, closed) = sync_channel(0);
 		drop(std::mem::replace(&mut self.ready, closed));
 		if let Some(thread) = self.thread.take() {
-			let _ = thread.join();
+			let _ = self.workers.join(thread);
 		}
 	}
 }
@@ -175,7 +176,7 @@ impl BatchReader {
 		}
 	}
 
-	fn spawn(self) -> Pipeline {
+	fn spawn(self, workers: &Workers) -> Pipeline {
 		let (ready_out, ready) = sync_channel(BATCHES_READY);
 		let (recycle, recycled) = sync_channel(BATCHES_RECYCLED);
 		let thread = thread::spawn(move || self.run(&ready_out, &recycled));
@@ -183,6 +184,7 @@ impl BatchReader {
 			ready,
 			recycle,
 			thread: Some(thread),
+			workers: workers.clone(),
 		}
 	}
 

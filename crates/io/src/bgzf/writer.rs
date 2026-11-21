@@ -25,6 +25,7 @@ pub struct BgzfWriter<W: Write + Send + 'static> {
 	completed: Receiver<Vec<u64>>,
 	offsets: Vec<u64>,
 	compressor: Option<JoinHandle<Result<Finished<W>, Error>>>,
+	workers: Workers,
 }
 
 #[derive(Debug)]
@@ -53,9 +54,9 @@ impl<W: Write + Send + 'static> BgzfWriter<W> {
 	pub fn new(inner: W, level: Level, workers: &Workers) -> Self {
 		let (commands, received) = bounded(BATCHES_IN_FLIGHT);
 		let (reported, completed) = unbounded();
-		let workers = workers.clone();
+		let compressing = workers.clone();
 		let compressor =
-			thread::spawn(move || compress(inner, level, &received, &reported, &workers));
+			thread::spawn(move || compress(inner, level, &received, &reported, &compressing));
 		Self {
 			payload: Vec::with_capacity(MAX_PAYLOAD_LEN),
 			batch: Vec::with_capacity(BLOCKS_PER_BATCH),
@@ -64,6 +65,7 @@ impl<W: Write + Send + 'static> BgzfWriter<W> {
 			completed,
 			offsets: Vec::new(),
 			compressor: Some(compressor),
+			workers: workers.clone(),
 		}
 	}
 
@@ -124,10 +126,9 @@ impl<W: Write + Send + 'static> BgzfWriter<W> {
 	}
 
 	fn join(&mut self) -> Result<Finished<W>, Error> {
-		self.compressor
-			.take()
-			.ok_or(Error::Disconnected)?
-			.join()
+		let compressor = self.compressor.take().ok_or(Error::Disconnected)?;
+		self.workers
+			.join(compressor)
 			.map_err(|_| Error::Disconnected)?
 	}
 }

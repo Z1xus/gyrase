@@ -56,6 +56,7 @@ pub struct BlockReader {
 	batches: Receiver<Result<Vec<Block>, Error>>,
 	ready: VecDeque<Block>,
 	threads: Vec<JoinHandle<()>>,
+	workers: Workers,
 }
 
 impl BlockReader {
@@ -67,12 +68,13 @@ impl BlockReader {
 		let (frames_out, frames_in) = bounded(readahead.batches);
 		let (blocks_out, blocks_in) = bounded(readahead.batches);
 		let scanner = thread::spawn(move || scan(input, &frames_out, readahead));
-		let workers = workers.clone();
-		let inflater = thread::spawn(move || inflate(&frames_in, &blocks_out, &workers));
+		let inflating = workers.clone();
+		let inflater = thread::spawn(move || inflate(&frames_in, &blocks_out, &inflating));
 		Self {
 			batches: blocks_in,
 			ready: VecDeque::new(),
 			threads: vec![scanner, inflater],
+			workers: workers.clone(),
 		}
 	}
 
@@ -100,7 +102,7 @@ impl Drop for BlockReader {
 	fn drop(&mut self) {
 		self.batches = never();
 		for thread in self.threads.drain(..) {
-			let _ = thread.join();
+			let _ = self.workers.join(thread);
 		}
 	}
 }
