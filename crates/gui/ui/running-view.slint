@@ -10,7 +10,8 @@ export component RunningView inherits VerticalLayout {
     in property <[Step]> steps;
     in property <int> current;
     in property <float> progress;
-    in property <string> status;
+    in property <string> percent;
+    in property <string> eta;
     in property <bool> cancellable;
     callback cancel;
 
@@ -60,11 +61,21 @@ export component RunningView inherits VerticalLayout {
                         value: root.progress;
                     }
 
-                    Text {
-                        text: root.status;
-                        font-size: 12px;
-                        color: Gel.ink-muted;
+                    HorizontalLayout {
                         min-height: 16px;
+
+                        Text {
+                            text: root.percent;
+                            horizontal-stretch: 1;
+                            font-size: 12px;
+                            color: Gel.ink-muted;
+                        }
+
+                        Text {
+                            text: root.eta;
+                            font-size: 12px;
+                            color: Gel.ink-muted;
+                        }
                     }
                 }
             }

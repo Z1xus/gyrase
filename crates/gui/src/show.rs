@@ -22,7 +22,7 @@ pub(crate) fn screen(app: &App, screen: &Screen) {
 		}
 		Screen::Stopping(prepared, _) => {
 			sample(app, prepared);
-			app.set_status(STOPPING.into());
+			app.set_eta(STOPPING.into());
 			status(app, View::Stopping, None);
 		}
 		Screen::Done(finished) => {
@@ -42,12 +42,8 @@ pub(crate) fn progress(app: &App, progress: Progress, fraction: f32) {
 	}
 	app.set_current(current(app, progress.stage));
 	app.set_progress(fraction);
-	let percent = format!("{:.0}%", fraction * 100.0);
-	let status = match progress.eta {
-		Some(remaining) => format!("{percent} · {}", labels::eta(remaining)),
-		None => percent,
-	};
-	app.set_status(status.into());
+	app.set_percent(format!("{:.0}%", fraction * 100.0).into());
+	app.set_eta(progress.eta.map(labels::eta).unwrap_or_default().into());
 }
 
 fn current(app: &App, stage: Stage) -> i32 {
@@ -67,7 +63,8 @@ fn status(app: &App, view: View, error: Option<&str>) {
 fn starting(app: &App) {
 	app.set_current(0);
 	app.set_progress(0.0);
-	app.set_status(SharedString::new());
+	app.set_percent(SharedString::new());
+	app.set_eta(SharedString::new());
 }
 
 fn sample(app: &App, prepared: &Prepared) {
@@ -106,7 +103,7 @@ fn detail(prepared: &Prepared) -> String {
 		),
 	};
 	format!(
-		"{} · {} · {}",
+		"{}, {}, {}",
 		labels::kind(kind),
 		labels::size(size),
 		plan.build.name()

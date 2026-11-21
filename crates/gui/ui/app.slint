@@ -21,7 +21,8 @@ export component App inherits Window {
     in property <string> folder;
     in property <int> current;
     in property <float> progress;
-    in property <string> status;
+    in property <string> percent;
+    in property <string> eta;
     in property <[Written]> written;
     callback choose-file;
     callback remove-sample;
@@ -79,7 +80,8 @@ export component App inherits Window {
             steps: root.steps;
             current: root.current;
             progress: root.progress;
-            status: root.status;
+            percent: root.percent;
+            eta: root.eta;
             cancellable: root.view == View.running;
             cancel => {
                 root.cancel();
