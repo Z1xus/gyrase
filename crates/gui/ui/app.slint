@@ -1,0 +1,146 @@
+import "../assets/fonts/Geist-Regular.ttf";
+import "../assets/fonts/Geist-Medium.ttf";
+import "../assets/fonts/Geist-SemiBold.ttf";
+import "../assets/fonts/GeistMono-Regular.ttf";
+import { Gel } from "palette.slint";
+import { DoneView } from "done-view.slint";
+import { PickView } from "pick-view.slint";
+import { ReadyView } from "ready-view.slint";
+import { RunningView } from "running-view.slint";
+import { TitleBar } from "title-bar.slint";
+import { Chip, Step, StepKind, View, Written } from "types.slint";
+
+export { Chip, Step, StepKind, View, Written }
+
+export component App inherits Window {
+    in property <View> view: View.pick;
+    in property <bool> dragging;
+    in property <string> error;
+    in property <string> name;
+    in property <[string]> tags;
+    in property <[Step]> steps;
+    in property <[Chip]> chips;
+    in property <string> folder;
+    in property <StepKind> stage: StepKind.call;
+    in property <string> stage-label;
+    in property <float> progress;
+    in property <string> eta;
+    in property <[Written]> written;
+    callback choose-file;
+    callback remove-sample;
+    callback toggle-format(int);
+    callback choose-folder;
+    callback start;
+    callback cancel;
+    callback open-folder;
+    callback another-file;
+    callback drag-window(Point);
+    callback minimize-window;
+    callback close-window;
+
+    title: "gyrase";
+    no-frame: true;
+    background: Gel.canvas;
+    default-font-family: "Geist";
+    default-font-weight: 400;
+    min-width: 440px;
+    max-width: 440px;
+    min-height: 560px;
+    max-height: 560px;
+
+    TitleBar {
+        x: 1px;
+        y: 1px;
+        width: root.width - 2px;
+        drag(point) => {
+            root.drag-window(point);
+        }
+        minimize => {
+            root.minimize-window();
+        }
+        close => {
+            root.close-window();
+        }
+    }
+
+    Rectangle {
+        x: 1px;
+        y: 45px;
+        width: root.width - 2px;
+        height: root.height - 46px;
+
+        if root.view == View.pick: PickView {
+            x: 20px;
+            width: parent.width - 40px;
+            y: 0px;
+            height: parent.height - 20px;
+            dragging: root.dragging;
+            error: root.error;
+            choose => {
+                root.choose-file();
+            }
+        }
+
+        if root.view == View.ready: ReadyView {
+            x: 20px;
+            width: parent.width - 40px;
+            y: 0px;
+            height: parent.height - 20px;
+            name: root.name;
+            tags: root.tags;
+            steps: root.steps;
+            chips: root.chips;
+            folder: root.folder;
+            error: root.error;
+            remove => {
+                root.remove-sample();
+            }
+            toggle(index) => {
+                root.toggle-format(index);
+            }
+            choose-folder => {
+                root.choose-folder();
+            }
+            start => {
+                root.start();
+            }
+        }
+
+        if root.view == View.running || root.view == View.stopping: RunningView {
+            x: 20px;
+            width: parent.width - 40px;
+            y: 0px;
+            height: parent.height - 20px;
+            name: root.name;
+            tags: root.tags;
+            stage: root.stage;
+            label: root.stage-label;
+            progress: root.progress;
+            eta: root.eta;
+            cancellable: root.view == View.running;
+            cancel => {
+                root.cancel();
+            }
+        }
+
+        if root.view == View.done: DoneView {
+            x: 20px;
+            width: parent.width - 40px;
+            y: 0px;
+            height: parent.height - 20px;
+            written: root.written;
+            error: root.error;
+            open-folder => {
+                root.open-folder();
+            }
+            again => {
+                root.another-file();
+            }
+        }
+    }
+
+    Rectangle {
+        border-width: 1px;
+        border-color: Gel.line;
+    }
+}

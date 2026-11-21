@@ -1,0 +1,23 @@
+import { Palette } from "std-widgets.slint";
+
+export global Gel {
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+
+    out property <color> canvas: dark ? #0e1918 : #edf3f2;
+    out property <color> surface: dark ? #152524 : #f8fbfb;
+    out property <color> wash: dark ? #1d3230 : #e1ecea;
+    out property <color> line: dark ? #29433f : #d3e0de;
+    out property <color> ink: dark ? #e4f1ef : #15302d;
+    out property <color> ink-muted: dark ? #8aa8a4 : #567470;
+
+    out property <color> accent: dark ? #3cc4b2 : #168575;
+    out property <color> accent-top: dark ? #62dccb : #2aa795;
+    out property <color> accent-edge: dark ? #2a9a8b : #10695c;
+    out property <color> accent-label: dark ? #05211d : #ffffff;
+    out property <color> accent-wash: dark ? #15403b : #d8efec;
+    out property <color> accent-ink: dark ? #6fe0d0 : #0f6e61;
+
+    out property <color> danger: dark ? #ff7b75 : #c8433f;
+    out property <color> shadow: dark ? #00000066 : #1c3a3622;
+    out property <color> gloss: dark ? #ffffff30 : #ffffff66;
+}

@@ -1,0 +1,32 @@
+export enum View {
+    pick,
+    ready,
+    running,
+    stopping,
+    done,
+}
+
+export enum StepKind {
+    reference,
+    index,
+    align,
+    sort,
+    call,
+    export,
+}
+
+export struct Step {
+    kind: StepKind,
+    label: string,
+}
+
+export struct Chip {
+    label: string,
+    on: bool,
+}
+
+export struct Written {
+    name: string,
+    detail: string,
+    raw: bool,
+}

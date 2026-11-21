@@ -1,0 +1,69 @@
+import { Gel } from "palette.slint";
+import { Icons } from "icons.slint";
+import { ErrorLine, Pressable, PrimaryButton } from "controls.slint";
+import { Tile } from "sample-card.slint";
+
+export component PickView inherits VerticalLayout {
+    in property <bool> dragging;
+    in property <string> error;
+    callback choose;
+
+    spacing: 12px;
+
+    Rectangle {
+        vertical-stretch: 1;
+        border-radius: 20px;
+        border-width: 1px;
+        border-color: root.dragging ? Gel.accent : Gel.line;
+        background: root.dragging ? Gel.accent-wash : Gel.surface;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 8px;
+
+            HorizontalLayout {
+                alignment: center;
+                padding-bottom: 8px;
+
+                Tile {
+                    source: Icons.new-file;
+                    size: 64px;
+                }
+            }
+
+            Text {
+                text: "Drop a file";
+                font-size: 20px;
+                font-weight: 600;
+                color: Gel.ink;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: "BAM or CRAM";
+                font-size: 13px;
+                color: Gel.ink-muted;
+                horizontal-alignment: center;
+            }
+        }
+
+        Pressable {
+            radius: 20px;
+            accessible-label: "Choose File";
+            clicked => {
+                root.choose();
+            }
+        }
+    }
+
+    if root.error != "": ErrorLine {
+        text: root.error;
+    }
+
+    PrimaryButton {
+        text: "Choose File";
+        clicked => {
+            root.choose();
+        }
+    }
+}

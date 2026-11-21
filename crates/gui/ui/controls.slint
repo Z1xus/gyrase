@@ -1,0 +1,237 @@
+import { Gel } from "palette.slint";
+import { Icon, Icons } from "icons.slint";
+
+export component Pressable inherits FocusScope {
+    in property <length> radius: 0px;
+    out property <bool> hovered: area.has-hover;
+    out property <bool> pressed: area.pressed;
+    callback clicked;
+
+    accessible-role: button;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    key-pressed(event) => {
+        if event.text == " " || event.text == Key.Return {
+            root.clicked();
+            return accept;
+        }
+        return reject;
+    }
+
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    Rectangle {
+        border-radius: root.radius;
+        border-width: root.has-focus ? 2px : 0px;
+        border-color: Gel.accent;
+    }
+}
+
+export component Card inherits Rectangle {
+    background: Gel.surface;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Gel.line;
+    drop-shadow-blur: 12px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: Gel.shadow;
+}
+
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+
+    height: 44px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Gel.accent-edge;
+    background: press.pressed ? Gel.accent : @linear-gradient(180deg, press.hovered ? Gel.accent-top.brighter(0.1) : Gel.accent-top 0%, Gel.accent 100%);
+    drop-shadow-blur: 10px;
+    drop-shadow-offset-y: 3px;
+    drop-shadow-color: Gel.shadow;
+
+    Rectangle {
+        x: 12px;
+        y: 1px;
+        width: parent.width - 24px;
+        height: 1px;
+        background: Gel.gloss;
+    }
+
+    Text {
+        text: root.text;
+        font-size: 14px;
+        font-weight: 600;
+        color: Gel.accent-label;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    press := Pressable {
+        radius: 12px;
+        accessible-label: root.text;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+
+    height: 36px;
+    preferred-width: label.preferred-width + 24px;
+    border-radius: 10px;
+    background: press.hovered ? Gel.wash : transparent;
+
+    label := Text {
+        text: root.text;
+        font-size: 13px;
+        font-weight: 500;
+        color: press.hovered ? Gel.ink : Gel.ink-muted;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    press := Pressable {
+        radius: 10px;
+        accessible-label: root.text;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component IconButton inherits Rectangle {
+    in property <image> source;
+    in property <string> label;
+    callback clicked;
+
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: press.hovered ? Gel.wash : transparent;
+
+    Icon {
+        source: root.source;
+        tint: press.hovered ? Gel.ink : Gel.ink-muted;
+    }
+
+    press := Pressable {
+        radius: 8px;
+        accessible-label: root.label;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component ChipButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    callback clicked;
+
+    height: 32px;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: root.on ? Gel.accent : Gel.line;
+    background: root.on ? Gel.accent-wash : press.hovered ? Gel.wash : Gel.surface;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+
+        if root.on: Icon {
+            source: Icons.check;
+            size: 12px;
+            tint: Gel.accent-ink;
+            y: (parent.height - self.height) / 2;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: 500;
+            color: root.on ? Gel.accent-ink : Gel.ink-muted;
+            vertical-alignment: center;
+        }
+    }
+
+    press := Pressable {
+        radius: 16px;
+        accessible-label: root.text;
+        accessible-checkable: true;
+        accessible-checked: root.on;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component Tag inherits Rectangle {
+    in property <string> text;
+
+    height: 22px;
+    preferred-width: label.preferred-width + 16px;
+    border-radius: 11px;
+    background: Gel.wash;
+
+    label := Text {
+        text: root.text;
+        font-family: "Geist Mono";
+        font-size: 11px;
+        color: Gel.ink-muted;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component ProgressBar inherits Rectangle {
+    in property <float> value;
+
+    height: 8px;
+    border-radius: 4px;
+    background: Gel.wash;
+
+    Rectangle {
+        x: 0px;
+        width: max(parent.height, parent.width * root.value);
+        height: parent.height;
+        border-radius: 4px;
+        background: @linear-gradient(180deg, Gel.accent-top 0%, Gel.accent 100%);
+
+        animate width {
+            duration: 200ms;
+            easing: ease-out;
+        }
+    }
+}
+
+export component ErrorLine inherits HorizontalLayout {
+    in property <string> text;
+
+    spacing: 8px;
+    height: 20px;
+
+    Icon {
+        source: Icons.error;
+        tint: Gel.danger;
+        y: (parent.height - self.height) / 2;
+    }
+
+    Text {
+        text: root.text;
+        font-size: 13px;
+        color: Gel.danger;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+}

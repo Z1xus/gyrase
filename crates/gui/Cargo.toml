@@ -1,0 +1,26 @@
+[package]
+name = "gyrase-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "gyrase"
+path = "src/main.rs"
+
+[dependencies]
+gyrase-extract.workspace = true
+gyrase-jobs.workspace = true
+opener = { version = "0.8.4", default-features = false }
+rfd = "0.18.0"
+slint.workspace = true
+
+[build-dependencies]
+slint-build = "1.18.1"
+
+[lints]
+workspace = true

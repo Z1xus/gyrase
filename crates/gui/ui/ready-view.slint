@@ -1,0 +1,135 @@
+import { Gel } from "palette.slint";
+import { Icon, Icons } from "icons.slint";
+import { Card, ChipButton, ErrorLine, Pressable, PrimaryButton } from "controls.slint";
+import { SampleCard } from "sample-card.slint";
+import { Chip, Step } from "types.slint";
+
+component FolderRow inherits Card {
+    in property <string> path;
+    callback choose;
+
+    height: 52px;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 10px;
+
+        Icon {
+            source: Icons.folder;
+            y: (parent.height - self.height) / 2;
+        }
+
+        Text {
+            text: root.path;
+            horizontal-stretch: 1;
+            font-size: 13px;
+            color: Gel.ink;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: "Change";
+            font-size: 13px;
+            font-weight: 500;
+            color: Gel.accent-ink;
+            vertical-alignment: center;
+        }
+    }
+
+    Pressable {
+        radius: 14px;
+        accessible-label: "Change Folder";
+        clicked => {
+            root.choose();
+        }
+    }
+}
+
+export component ReadyView inherits VerticalLayout {
+    in property <string> name;
+    in property <[string]> tags;
+    in property <[Step]> steps;
+    in property <[Chip]> chips;
+    in property <string> folder;
+    in property <string> error;
+    callback remove;
+    callback toggle(int);
+    callback choose-folder;
+    callback start;
+
+    spacing: 12px;
+
+    SampleCard {
+        name: root.name;
+        tags: root.tags;
+        removable: true;
+        remove => {
+            root.remove();
+        }
+    }
+
+    Card {
+        VerticalLayout {
+            padding: 12px;
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 4px;
+
+            for step in root.steps: HorizontalLayout {
+                height: 28px;
+                spacing: 10px;
+
+                Icon {
+                    source: Icons.step(step.kind);
+                    y: (parent.height - self.height) / 2;
+                }
+
+                Text {
+                    text: step.label;
+                    font-size: 13px;
+                    color: Gel.ink;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    if root.chips.length > 0: GridLayout {
+        spacing: 8px;
+
+        for chip[index] in root.chips: ChipButton {
+            row: floor(index / 3);
+            col: mod(index, 3);
+            width: (root.width - 16px) / 3;
+            text: chip.label;
+            on: chip.on;
+            clicked => {
+                root.toggle(index);
+            }
+        }
+    }
+
+    FolderRow {
+        path: root.folder;
+        choose => {
+            root.choose-folder();
+        }
+    }
+
+    Rectangle {
+        vertical-stretch: 1;
+    }
+
+    if root.error != "": ErrorLine {
+        text: root.error;
+    }
+
+    PrimaryButton {
+        text: "Start";
+        clicked => {
+            root.start();
+        }
+    }
+}

@@ -1,0 +1,72 @@
+import { Gel } from "palette.slint";
+import { Icons } from "icons.slint";
+import { ProgressBar, TextButton } from "controls.slint";
+import { SampleCard, Tile } from "sample-card.slint";
+import { StepKind } from "types.slint";
+
+export component RunningView inherits VerticalLayout {
+    in property <string> name;
+    in property <[string]> tags;
+    in property <StepKind> stage;
+    in property <string> label;
+    in property <float> progress;
+    in property <string> eta;
+    in property <bool> cancellable;
+    callback cancel;
+
+    spacing: 12px;
+
+    SampleCard {
+        name: root.name;
+        tags: root.tags;
+    }
+
+    VerticalLayout {
+        vertical-stretch: 1;
+        alignment: center;
+        spacing: 16px;
+
+        HorizontalLayout {
+            alignment: center;
+
+            Tile {
+                source: Icons.step(root.stage);
+                size: 64px;
+            }
+        }
+
+        Text {
+            text: root.label;
+            font-size: 20px;
+            font-weight: 600;
+            color: Gel.ink;
+            horizontal-alignment: center;
+        }
+
+        ProgressBar {
+            value: root.progress;
+        }
+
+        Text {
+            text: root.eta;
+            font-family: "Geist Mono";
+            font-size: 12px;
+            color: Gel.ink-muted;
+            horizontal-alignment: center;
+            min-height: 16px;
+        }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        height: 44px;
+
+        if root.cancellable: TextButton {
+            text: "Cancel";
+            y: (parent.height - self.height) / 2;
+            clicked => {
+                root.cancel();
+            }
+        }
+    }
+}

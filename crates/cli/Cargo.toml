@@ -1,0 +1,27 @@
+[package]
+name = "gyrase-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "gyr"
+path = "src/main.rs"
+
+[dependencies]
+gyrase-extract.workspace = true
+gyrase-genome.workspace = true
+gyrase-index.workspace = true
+gyrase-io.workspace = true
+gyrase-jobs.workspace = true
+gyrase-reads.workspace = true
+gyrase-variants.workspace = true
+ctrlc.workspace = true
+lexopt.workspace = true
+memchr.workspace = true
+
+[lints]
+workspace = true

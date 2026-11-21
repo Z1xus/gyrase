@@ -1,0 +1,99 @@
+import { Gel } from "palette.slint";
+import { Icon, Icons } from "icons.slint";
+import { Card, ErrorLine, PrimaryButton, TextButton } from "controls.slint";
+import { Written } from "types.slint";
+
+export component DoneView inherits VerticalLayout {
+    in property <[Written]> written;
+    in property <string> error;
+    callback open-folder;
+    callback again;
+
+    spacing: 12px;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 8px;
+        padding-top: 16px;
+        padding-bottom: 8px;
+
+        HorizontalLayout {
+            alignment: center;
+
+            Icon {
+                source: Icons.done;
+                size: 40px;
+                tint: Gel.accent;
+            }
+        }
+
+        Text {
+            text: "Done";
+            font-size: 22px;
+            font-weight: 600;
+            color: Gel.ink;
+            horizontal-alignment: center;
+        }
+    }
+
+    Card {
+        VerticalLayout {
+            padding: 8px;
+
+            for entry in root.written: HorizontalLayout {
+                height: 36px;
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 10px;
+
+                Icon {
+                    source: entry.raw ? Icons.file : Icons.dna;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                Text {
+                    text: entry.name;
+                    horizontal-stretch: 1;
+                    font-size: 13px;
+                    color: Gel.ink;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: entry.detail;
+                    font-family: "Geist Mono";
+                    font-size: 11px;
+                    color: Gel.ink-muted;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        vertical-stretch: 1;
+    }
+
+    if root.error != "": ErrorLine {
+        text: root.error;
+    }
+
+    PrimaryButton {
+        text: "Open Folder";
+        clicked => {
+            root.open-folder();
+        }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+
+        TextButton {
+            text: "Another File";
+            clicked => {
+                root.again();
+            }
+        }
+    }
+}
