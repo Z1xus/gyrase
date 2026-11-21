@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{self, BufReader, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,6 +23,24 @@ const MAX_SORT_MEMORY: u64 = 4 << 30;
 const SORT_MEMORY_SHARE: u64 = 4;
 const COORDINATE: &str = "coordinate";
 const RECORDS_PER_REPORT: u32 = 1 << 16;
+
+struct Stoppable {
+	file: File,
+	cancel: Cancel,
+}
+
+impl Write for Stoppable {
+	fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+		self.cancel
+			.check()
+			.map_err(|_| io::Error::other("cancelled"))?;
+		self.file.write(buffer)
+	}
+
+	fn flush(&mut self) -> io::Result<()> {
+		self.file.flush()
+	}
+}
 
 pub(crate) fn coordinate_sorted(header: &Header) -> bool {
 	header.lines().iter().any(|line| match line {
@@ -179,13 +197,20 @@ pub(crate) fn write_sorted(
 	feed(&mut sorter)?;
 	cancel.check()?;
 	let (partial, file) = Partial::create(output)?;
-	let (written, stats) = match marking {
-		Some(settings) => {
-			let (written, stats) = sorter.finish_marking(file, Level::DEFAULT, settings)?;
-			(written, Some(stats))
-		}
-		None => (sorter.finish(file, Level::DEFAULT)?, None),
+	let sink = Stoppable {
+		file,
+		cancel: cancel.clone(),
 	};
+	let finished = match marking {
+		Some(settings) => sorter
+			.finish_marking(sink, Level::DEFAULT, settings)
+			.map(|(written, stats)| (written, Some(stats))),
+		None => sorter
+			.finish(sink, Level::DEFAULT)
+			.map(|written| (written, None)),
+	};
+	cancel.check()?;
+	let (written, stats) = finished?;
 	drop(written.output);
 	partial.commit()?;
 	write_index(&written.index, written.format, output, workers)?;
