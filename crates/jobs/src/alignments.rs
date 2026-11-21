@@ -131,7 +131,7 @@ impl Alignments {
 				.plan(&[interval], DEFAULT_MAX_GAP)
 				.chunks()
 				.iter()
-				.map(|chunk| chunk.end.block().saturating_sub(chunk.begin.block()))
+				.map(|chunk| chunk.end.block().saturating_sub(chunk.begin.block()).max(1))
 				.sum(),
 			Lookup::Cram(crai) => crai
 				.overlapping(interval)
