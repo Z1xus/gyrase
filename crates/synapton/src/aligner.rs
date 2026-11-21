@@ -46,6 +46,20 @@ pub struct ReadPair<'a> {
 	pub second: Read<'a>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct InsertSizes(InsertModel);
+
+fn pair_sequences<'a>(pairs: &[ReadPair<'a>]) -> Result<Vec<&'a [u8]>, Error> {
+	let mut sequences = Vec::with_capacity(2 * pairs.len());
+	for (index, pair) in pairs.iter().enumerate() {
+		pair.first.validate(index)?;
+		pair.second.validate(index)?;
+		sequences.push(pair.first.sequence);
+		sequences.push(pair.second.sequence);
+	}
+	Ok(sequences)
+}
+
 #[derive(Debug)]
 pub struct Aligner<'a, E: Extender = CpuExtender> {
 	index: &'a Index,
@@ -84,16 +98,22 @@ impl<'a, E: Extender> Aligner<'a, E> {
 	}
 
 	pub fn align_pairs(&self, pairs: &[ReadPair<'_>]) -> Result<AlignedBatch, Error> {
-		for (index, pair) in pairs.iter().enumerate() {
-			pair.first.validate(index)?;
-			pair.second.validate(index)?;
-		}
-		let sequences: Vec<&[u8]> = pairs
-			.iter()
-			.flat_map(|pair| [pair.first.sequence, pair.second.sequence])
-			.collect();
-		let model = self.estimate_insert_model(&sequences);
-		Ok(self.run(&sequences, 2, Layout::Paired(&model)))
+		let sizes = self.estimate_insert_sizes(pairs)?;
+		self.align_pairs_with(&sizes, pairs)
+	}
+
+	pub fn estimate_insert_sizes(&self, pairs: &[ReadPair<'_>]) -> Result<InsertSizes, Error> {
+		let sequences = pair_sequences(pairs)?;
+		Ok(InsertSizes(self.estimate_insert_model(&sequences)))
+	}
+
+	pub fn align_pairs_with(
+		&self,
+		sizes: &InsertSizes,
+		pairs: &[ReadPair<'_>],
+	) -> Result<AlignedBatch, Error> {
+		let sequences = pair_sequences(pairs)?;
+		Ok(self.run(&sequences, 2, Layout::Paired(&sizes.0)))
 	}
 
 	fn estimate_insert_model(&self, sequences: &[&[u8]]) -> InsertModel {

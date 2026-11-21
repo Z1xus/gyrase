@@ -4,6 +4,8 @@ use crate::config::AlignConfig;
 use crate::index::{Index, Probe, entry_offset, entry_position};
 use crate::seeding::{Seed, Seeder};
 
+const MAX_FIRST_STROBE_HITS: usize = 20;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Mapped {
 	pub(crate) repeat_fraction: f32,
@@ -48,25 +50,9 @@ impl<'a> Mapper<'a> {
 		reverse: &[u8],
 		chains: &mut Vec<Chain>,
 	) -> Mapped {
-		chains.clear();
-		let cutoff = self.hits.first;
-		let mut repeat_fraction = 0.0;
-		for strand in [Strand::Forward, Strand::Reverse] {
-			let codes = match strand {
-				Strand::Forward => forward,
-				Strand::Reverse => reverse,
-			};
-			let fraction = self.chains_for(codes, strand, cutoff, chains);
-			repeat_fraction += fraction;
-		}
+		let mut repeat_fraction = self.pass(forward, reverse, self.hits.first, chains);
 		if chains.is_empty() && repeat_fraction > 0.0 {
-			for strand in [Strand::Forward, Strand::Reverse] {
-				let codes = match strand {
-					Strand::Forward => forward,
-					Strand::Reverse => reverse,
-				};
-				self.chains_for(codes, strand, self.hits.relaxed, chains);
-			}
+			repeat_fraction = self.pass(forward, reverse, self.hits.relaxed, chains);
 		}
 		chains.sort_unstable_by(|left, right| {
 			right
@@ -78,6 +64,25 @@ impl<'a> Mapper<'a> {
 		Mapped {
 			repeat_fraction: (repeat_fraction / 2.0).min(1.0),
 		}
+	}
+
+	fn pass(
+		&mut self,
+		forward: &[u8],
+		reverse: &[u8],
+		cutoff: usize,
+		chains: &mut Vec<Chain>,
+	) -> f32 {
+		chains.clear();
+		let mut repeat_fraction = 0.0;
+		for strand in [Strand::Forward, Strand::Reverse] {
+			let codes = match strand {
+				Strand::Forward => forward,
+				Strand::Reverse => reverse,
+			};
+			repeat_fraction += self.chains_for(codes, strand, cutoff, chains);
+		}
+		repeat_fraction
 	}
 
 	fn chains_for(
@@ -109,6 +114,14 @@ impl<'a> Mapper<'a> {
 						position + u64::from(offset),
 						seed.position + seed.offset,
 					));
+				}
+			}
+			if hits.is_empty()
+				&& self.index.first_strobe_run(probe).count() <= MAX_FIRST_STROBE_HITS
+			{
+				for hit in self.index.first_strobe_run(probe) {
+					let position = u64::from(entry_position(hit));
+					self.anchors.push(pack_anchor(position, seed.position));
 				}
 			}
 		}

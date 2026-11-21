@@ -8,6 +8,10 @@ pub enum Error {
 	Genome(#[from] gyrase_genome::Error),
 	#[error(transparent)]
 	Workers(#[from] gyrase_io::Error),
+	#[error(transparent)]
+	Record(#[from] gyrase_reads::RecordError),
+	#[error("alignment refers to read {0}, which is not in the given input")]
+	ForeignBatch(u32),
 	#[error("invalid seeding parameters: {0}")]
 	InvalidSeeding(&'static str),
 	#[error("reference has {length} bases, the index limit is {limit}")]

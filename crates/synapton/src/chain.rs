@@ -7,7 +7,7 @@ const MAX_LOOKBACK: usize = 50;
 const MAX_DIAGONAL_DIFFERENCE: u64 = 50;
 const MAX_REFERENCE_GAP: u64 = 1024;
 const DIAGONAL_PENALTY: f32 = 0.1;
-const MIN_CHAIN_SCORE: f32 = 1.5;
+const MIN_CHAIN_SCORE: f32 = 1.0;
 const NO_PARENT: usize = usize::MAX;
 
 #[derive(Debug, Clone, Copy)]

@@ -101,6 +101,20 @@ impl Index {
 		}
 	}
 
+	pub(crate) fn first_strobe_run(&self, probe: &Probe) -> impl Iterator<Item = u64> + '_ {
+		let main = entry::main_tag_of(probe.prefix);
+		let orientation = entry::first_orientation_of(probe.prefix);
+		self.entries
+			.get(probe.range.clone())
+			.unwrap_or_default()
+			.iter()
+			.copied()
+			.filter(move |&found| {
+				entry::main_tag_of(entry::prefix_of(found)) == main
+					&& entry::first_orientation_of(entry::prefix_of(found)) == orientation
+			})
+	}
+
 	pub(crate) fn run(&self, probe: &Probe) -> &[u64] {
 		let bucket = self.entries.get(probe.range.clone()).unwrap_or_default();
 		let first = bucket

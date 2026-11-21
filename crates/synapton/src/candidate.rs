@@ -133,14 +133,14 @@ pub(crate) fn ungapped(scoring: &Scoring, query: &[u8], reference: &[u8]) -> Opt
 				return None;
 			}
 		}
-		if prefix < -clip {
+		if prefix <= -clip {
 			return None;
 		}
 	}
 	let mut suffix = 0i32;
 	for (&q, &r) in query.iter().zip(reference).rev() {
 		suffix += if q == r { matched } else { -mismatch };
-		if suffix < -clip {
+		if suffix <= -clip {
 			return None;
 		}
 	}
