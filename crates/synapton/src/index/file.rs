@@ -166,7 +166,8 @@ impl Header {
 			&& self.bucket_count < (1 << 40)
 			&& self.entry_count < (1 << 40)
 			&& self.unique_count < (1 << 40)
-			&& self.meta_len < (1 << 40);
+			&& self.meta_len < (1 << 40)
+			&& self.unique_count == self.word_count.div_ceil(64);
 		if !sane {
 			return Err(Error::CorruptIndex("section sizes"));
 		}
