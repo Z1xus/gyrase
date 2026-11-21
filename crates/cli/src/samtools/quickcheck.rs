@@ -1,16 +1,17 @@
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 
-use gyrase_io::Workers;
-use gyrase_reads::BamReader;
+use gyrase_io::{Workers, decode};
 use gyrase_reads::cram::CramReader;
+use gyrase_reads::{BamReader, SamReader};
 use lexopt::Parser;
 use lexopt::prelude::*;
 
+use super::input::{Kind, kind};
 use crate::failure::Failure;
 use crate::shared::workers;
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: samtools quickcheck [options] <input> [...]
 
 Options:
@@ -19,6 +20,7 @@ Options:
   -u  unmapped input, do not require references in the header
 ";
 
+const HEAD_LENGTH: u64 = 1 << 16;
 const BGZF_EOF: [u8; 28] = [
 	0x1f, 0x8b, 0x08, 0x04, 0, 0, 0, 0, 0, 0xff, 0x06, 0, 0x42, 0x43, 0x02, 0, 0x1b, 0, 0x03, 0, 0,
 	0, 0, 0, 0, 0, 0, 0,
@@ -40,37 +42,48 @@ fn problem(path: &str, unmapped: bool, workers: &Workers) -> Result<Option<&'sta
 	let Ok(mut file) = File::open(path) else {
 		return Ok(Some("could not be opened for reading."));
 	};
-	let mut head = [0u8; 4];
-	let read = file.read(&mut head)?;
-	let head = head.get(..read).unwrap_or_default();
-	if head.starts_with(&[0x1f, 0x8b]) {
-		if !has_tail(&mut file, &BGZF_EOF)? {
-			return Ok(Some("was missing EOF block when one should be present."));
+	let mut head = Vec::new();
+	Read::by_ref(&mut file)
+		.take(HEAD_LENGTH)
+		.read_to_end(&mut head)?;
+	let bgzf = head.starts_with(&[0x1f, 0x8b, 0x08, 0x04]) && head.get(12..14) == Some(b"BC");
+	if bgzf && !has_tail(&mut file, &BGZF_EOF)? {
+		return Ok(Some("was missing EOF block when one should be present."));
+	}
+	file.rewind()?;
+	let references = match kind(head.as_slice())? {
+		Kind::Bam => {
+			let Ok(header) = BamReader::read_header(&file, workers) else {
+				return Ok(Some("could not read the header."));
+			};
+			header.references().len()
 		}
-		let Ok(header) = BamReader::read_header(&file, workers) else {
-			return Ok(Some("could not read the header."));
-		};
-		if !unmapped && header.references().is_empty() {
-			return Ok(Some("had no targets in header."));
+		Kind::Cram => {
+			let Ok(reader) = CramReader::open(Box::new(file.try_clone()?), None, path, workers)
+			else {
+				return Ok(Some("could not read the header."));
+			};
+			if !has_tail(&mut file, &CRAM_EOF)? {
+				return Ok(Some("was missing EOF block when one should be present."));
+			}
+			reader.header().references().len()
 		}
-	} else if head.starts_with(b"CRAM") {
-		file.rewind()?;
-		let Ok(reader) = CramReader::open(Box::new(file.try_clone()?), None, path, workers) else {
-			return Ok(Some("could not read the header."));
-		};
-		if !has_tail(&mut file, &CRAM_EOF)? {
-			return Ok(Some("was missing EOF block when one should be present."));
+		Kind::Sam => {
+			let text = decode(Box::new(file), workers)?;
+			let Ok(reader) = SamReader::new(Box::new(text) as Box<dyn BufRead>) else {
+				return Ok(Some("could not read the header."));
+			};
+			reader.header().references().len()
 		}
-		if !unmapped && reader.header().references().is_empty() {
-			return Ok(Some("had no targets in header."));
-		}
-	} else if !head.starts_with(b"@") {
-		return Ok(Some("was not identified as sequence data."));
+		Kind::Unknown => return Ok(Some("was not identified as sequence data.")),
+	};
+	if !unmapped && references == 0 {
+		return Ok(Some("had no targets in header."));
 	}
 	Ok(None)
 }
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut verbose = false;
 	let mut quiet = false;
 	let mut unmapped = false;

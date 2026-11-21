@@ -1,12 +1,12 @@
-use gyrase_variants::{Condition, Counts, Fidelity, SampleChoice, View, ViewOptions};
+use gyrase_variants::{Condition, Counts, Fidelity, Format, SampleChoice, View, ViewOptions};
 use lexopt::Parser;
 use lexopt::prelude::*;
 
-use super::input::{Selection, each};
+use super::input::{Selection, each, set_condition};
 use super::output::{Collector, Common};
 use crate::failure::{Failure, file};
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: bcftools view [options] <in.vcf.gz>|<in.bcf>
 
 Options:
@@ -27,20 +27,20 @@ Options:
       --threads INT          number of additional threads
 ";
 
-pub fn samples(list: &str) -> SampleChoice {
+fn samples(list: &str) -> SampleChoice {
 	match list.strip_prefix('^') {
 		Some(rest) => SampleChoice::Drop(rest.split(',').map(str::to_owned).collect()),
 		None => SampleChoice::Keep(list.split(',').map(str::to_owned).collect()),
 	}
 }
 
-pub fn sample_file(path: &str) -> Result<SampleChoice, Failure> {
-	let text = std::fs::read_to_string(path).map_err(|error| file(path, "reading", &error))?;
-	let (names, drop) = match text.lines().next().and_then(|line| line.strip_prefix('^')) {
-		Some(_) => (text.replacen('^', "", 1), true),
-		None => (text, false),
+fn sample_file(argument: &str) -> Result<SampleChoice, Failure> {
+	let (path, drop) = match argument.strip_prefix('^') {
+		Some(path) => (path, true),
+		None => (argument, false),
 	};
-	let names = names
+	let text = std::fs::read_to_string(path).map_err(|error| file(path, "reading", &error))?;
+	let names = text
 		.lines()
 		.map(|line| {
 			line.split_whitespace()
@@ -57,12 +57,12 @@ pub fn sample_file(path: &str) -> Result<SampleChoice, Failure> {
 	})
 }
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut common = Common::new();
 	let mut selection = Selection::default();
 	let mut options = ViewOptions::default();
-	let mut header_only = false;
-	let mut no_header = false;
+	let mut condition = None;
+	let mut rows = Rows::Both;
 	let mut path = None;
 	while let Some(arg) = parser.next()? {
 		match arg {
@@ -79,18 +79,24 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 				selection.targets_file(&parser.value()?.string()?)?;
 			}
 			Short('i') | Long("include") => {
-				options.condition = Some(Condition::Include(parser.value()?.string()?));
+				set_condition(
+					&mut condition,
+					Condition::Include(parser.value()?.string()?),
+				)?;
 			}
 			Short('e') | Long("exclude") => {
-				options.condition = Some(Condition::Exclude(parser.value()?.string()?));
+				set_condition(
+					&mut condition,
+					Condition::Exclude(parser.value()?.string()?),
+				)?;
 			}
 			Short('s') | Long("samples") => options.samples = samples(&parser.value()?.string()?),
 			Short('S') | Long("samples-file") => {
 				options.samples = sample_file(&parser.value()?.string()?)?;
 			}
 			Short('I') | Long("no-update") => options.counts = Counts::Keep,
-			Short('h') | Long("header-only") => header_only = true,
-			Short('H') | Long("no-header") => no_header = true,
+			Short('h') | Long("header-only") => rows = rows.choose(Rows::HeaderOnly)?,
+			Short('H') | Long("no-header") => rows = rows.choose(Rows::RecordsOnly)?,
 			Long("help") => return Err(Failure::Help),
 			Value(value) if path.is_none() => path = Some(value.string()?),
 			Value(_) => return Err(Failure::usage("too many arguments")),
@@ -99,19 +105,45 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 	}
 	let workers = common.workers()?;
 	let destination = &common.destination;
-	let (source, regions) = selection.open(path.as_deref().unwrap_or("-"), &workers)?;
+	if rows == Rows::RecordsOnly && destination.kind.format() == Format::Bcf {
+		return Err(Failure::new(
+			"BCF output requires a header, -H cannot be used",
+		));
+	}
+	let path = path.unwrap_or_else(|| String::from("-"));
+	let target = common.target(&[&path])?;
+	let (source, regions) = selection.open(&path, &workers)?;
+	options.condition = condition;
 	options.regions = regions;
-	options.format = destination.kind.format;
+	options.format = destination.kind.format();
 	options.fidelity = Fidelity::Canonical;
 	let view = View::new(source.header(), options)?;
 	let mut collector = Collector::new();
-	let mut writer = if no_header {
-		destination.bare(&workers)?
-	} else {
-		destination.writer(view.header(), view.format(), &workers)?
+	let mut writer = match rows {
+		Rows::RecordsOnly => destination.bare(&workers, &target)?,
+		Rows::Both | Rows::HeaderOnly => {
+			destination.writer(view.header(), view.format(), &workers, &target)?
+		}
 	};
-	if !header_only {
+	if rows != Rows::HeaderOnly {
 		each!(source, reader => view.run(reader, &mut writer, &workers, collector.mark())?);
 	}
-	destination.finish(writer, &collector, view.header(), &workers)
+	destination.finish(writer, &collector, view.header(), &workers, &target)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Rows {
+	Both,
+	HeaderOnly,
+	RecordsOnly,
+}
+
+impl Rows {
+	fn choose(self, next: Self) -> Result<Self, Failure> {
+		match self {
+			Self::Both => Ok(next),
+			_ if self == next => Ok(next),
+			_ => Err(Failure::usage("-h and -H cannot be combined")),
+		}
+	}
 }

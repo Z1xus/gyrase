@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 
 use gyrase_genome::Interval;
 use gyrase_io::Level;
@@ -7,12 +7,12 @@ use gyrase_variants::Regions;
 use lexopt::Parser;
 use lexopt::prelude::*;
 
-use super::input::{Input, reference};
+use super::input::{Input, Need, reference};
 use super::output::{Format, Output};
 use crate::failure::{Failure, file};
-use crate::shared::{create, workers};
+use crate::shared::{Output as Sink, Target, workers};
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: samtools view [options] <in.bam>|<in.sam>|<in.cram> [region ...]
 
 Options:
@@ -63,7 +63,7 @@ impl Filter {
 	}
 }
 
-pub fn parse_flags(text: &str) -> Result<u16, Failure> {
+pub(super) fn parse_flags(text: &str) -> Result<u16, Failure> {
 	let parsed = match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
 		Some(hex) => u16::from_str_radix(hex, 16),
 		None => text.parse(),
@@ -76,7 +76,10 @@ fn load_targets(path: &str, header: &Header) -> Result<Regions, Failure> {
 	let contigs = header.contigs()?;
 	let mut intervals = Vec::new();
 	for line in text.lines() {
-		let mut fields = line.split('\t');
+		if line.starts_with(['#']) || line.starts_with("track") || line.starts_with("browser") {
+			continue;
+		}
+		let mut fields = line.split_whitespace();
 		let (Some(name), Some(start), Some(end)) = (fields.next(), fields.next(), fields.next())
 		else {
 			continue;
@@ -91,9 +94,19 @@ fn load_targets(path: &str, header: &Header) -> Result<Regions, Failure> {
 	Ok(Regions::new(&intervals))
 }
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+fn tally(input: Input, filter: &Filter, mut sink: Sink, target: &Target) -> Result<(), Failure> {
+	let mut total = 0u64;
+	input.each(|record| {
+		total += u64::from(filter.accepts(record));
+		Ok(())
+	})?;
+	writeln!(sink, "{total}")?;
+	target.commit(sink)
+}
+
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut format = None;
-	let mut level = Level::DEFAULT;
+	let mut level = None;
 	let mut with_header = false;
 	let mut header_only = false;
 	let mut count = false;
@@ -117,10 +130,9 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 					})?);
 			}
 			Short('u') | Long("uncompressed") => {
-				format = Some(Format::Bam);
-				level = Level::STORED;
+				level = Some(Level::STORED);
 			}
-			Short('1') | Long("fast") => level = Level::FASTEST,
+			Short('1') | Long("fast") => level = Some(Level::FASTEST),
 			Short('h') | Long("with-header") => with_header = true,
 			Short('H') | Long("header-only") => header_only = true,
 			Short('c') | Long("count") => count = true,
@@ -143,39 +155,43 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 		}
 	}
 	let mut positional = positional.into_iter();
-	let path = positional
-		.next()
-		.ok_or_else(|| Failure::usage("no input file"))?;
+	let path = match positional.next() {
+		Some(path) => path,
+		None if std::io::stdin().is_terminal() => return Err(Failure::usage("no input file")),
+		None => String::from("-"),
+	};
 	let regions: Vec<String> = positional.collect();
-	let format = format.unwrap_or_else(|| output.as_deref().map_or(Format::Sam, Format::of_path));
+	let format = format
+		.or_else(|| output.as_deref().and_then(Format::of_path))
+		.unwrap_or(if level.is_some() {
+			Format::Bam
+		} else {
+			Format::Sam
+		});
+	let mut inputs = vec![path.as_str()];
+	inputs.extend(reference_path.as_deref());
+	inputs.extend(target_file.as_deref());
+	let target = Target::new(output.as_deref(), &inputs)?;
 	let workers = workers(threads)?;
 	let reference = reference_path.as_deref().map(reference).transpose()?;
 	let input = if regions.is_empty() {
-		Input::open(&path, reference.as_ref(), &workers)?
+		Input::open(&path, reference.as_ref(), Need::Sequences, &workers)?
 	} else {
 		Input::query(&path, &regions, multi, reference.as_ref(), &workers)?
 	};
 	if let Some(targets) = &target_file {
 		filter.targets = Some(load_targets(targets, &input.header)?);
 	}
-	let sink = create(output.as_deref())?;
+	let sink = target.open()?;
 	if count {
-		let mut total = 0u64;
-		input.each(|record| {
-			total += u64::from(filter.accepts(record));
-			Ok(())
-		})?;
-		let mut sink = sink;
-		writeln!(sink, "{total}")?;
-		sink.flush()?;
-		return Ok(());
+		return tally(input, &filter, sink, &target);
 	}
 	let mut writer = Output::new(
 		sink,
 		format,
 		&input.header,
 		with_header || header_only,
-		level,
+		level.unwrap_or(Level::DEFAULT),
 		reference.as_ref(),
 		&workers,
 	)?;
@@ -187,5 +203,5 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 			Ok(())
 		})?;
 	}
-	writer.finish()
+	target.commit(writer.finish()?)
 }

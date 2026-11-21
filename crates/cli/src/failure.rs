@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 #[derive(Debug)]
-pub enum Failure {
+pub(crate) enum Failure {
 	Help,
 	Failed,
 	Usage(String),
@@ -9,16 +9,16 @@ pub enum Failure {
 }
 
 impl Failure {
-	pub fn new(message: impl Into<String>) -> Self {
+	pub(crate) fn new(message: impl Into<String>) -> Self {
 		Self::Error(message.into())
 	}
 
-	pub fn usage(message: impl Into<String>) -> Self {
+	pub(crate) fn usage(message: impl Into<String>) -> Self {
 		Self::Usage(message.into())
 	}
 }
 
-pub fn file(path: &str, action: &str, error: &std::io::Error) -> Failure {
+pub(crate) fn file(path: &str, action: &str, error: &std::io::Error) -> Failure {
 	Failure::Error(format!(
 		"failed to open \"{path}\" for {action}: {}",
 		plain(error)

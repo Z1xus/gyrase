@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::sync::Arc;
 
 use gyrase_genome::Reference;
@@ -10,14 +9,14 @@ use crate::failure::Failure;
 use crate::shared::Output as Sink;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Format {
+pub(super) enum Format {
 	Sam,
 	Bam,
 	Cram,
 }
 
 impl Format {
-	pub fn named(name: &str) -> Option<Self> {
+	pub(super) fn named(name: &str) -> Option<Self> {
 		match name.to_ascii_lowercase().as_str() {
 			"sam" => Some(Self::Sam),
 			"bam" => Some(Self::Bam),
@@ -26,21 +25,20 @@ impl Format {
 		}
 	}
 
-	pub fn of_path(path: &str) -> Self {
+	pub(super) fn of_path(path: &str) -> Option<Self> {
 		path.rsplit_once('.')
 			.and_then(|(_, extension)| Self::named(extension))
-			.unwrap_or(Self::Sam)
 	}
 }
 
-pub enum Output {
+pub(super) enum Output {
 	Sam(SamWriter<Sink>),
 	Bam(BamWriter<Sink>),
 	Cram(CramWriter<Sink>),
 }
 
 impl Output {
-	pub fn new(
+	pub(super) fn new(
 		sink: Sink,
 		format: Format,
 		header: &Header,
@@ -66,7 +64,7 @@ impl Output {
 		})
 	}
 
-	pub fn write(&mut self, record: RecordRef<'_>) -> Result<(), Failure> {
+	pub(super) fn write(&mut self, record: RecordRef<'_>) -> Result<(), Failure> {
 		match self {
 			Self::Sam(writer) => writer.write(record)?,
 			Self::Bam(writer) => {
@@ -77,13 +75,11 @@ impl Output {
 		Ok(())
 	}
 
-	pub fn finish(self) -> Result<(), Failure> {
-		let mut sink = match self {
+	pub(super) fn finish(self) -> Result<Sink, Failure> {
+		Ok(match self {
 			Self::Sam(writer) => writer.finish()?,
 			Self::Bam(writer) => writer.finish()?.inner,
 			Self::Cram(writer) => writer.finish()?.sink,
-		};
-		sink.flush()?;
-		Ok(())
+		})
 	}
 }

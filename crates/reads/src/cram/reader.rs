@@ -130,10 +130,25 @@ impl CramReader {
 		workers: &Workers,
 	) -> Result<Self, Error> {
 		let header = read_header(&mut source)?;
+		let environment = Environment::new(&header, reference, name);
 		Ok(Self::assemble(
 			header,
-			reference,
-			name,
+			environment,
+			Input::Stream(source),
+			None,
+			workers,
+		))
+	}
+
+	pub fn open_unbacked(
+		mut source: Box<dyn Read + Send>,
+		workers: &Workers,
+	) -> Result<Self, Error> {
+		let header = read_header(&mut source)?;
+		let environment = Environment::unbacked(&header);
+		Ok(Self::assemble(
+			header,
+			environment,
 			Input::Stream(source),
 			None,
 			workers,
@@ -160,10 +175,10 @@ impl CramReader {
 			offsets,
 			next: 0,
 		};
+		let environment = Environment::new(&header, reference, name);
 		Ok(Self::assemble(
 			header,
-			reference,
-			name,
+			environment,
 			input,
 			Some(region),
 			workers,
@@ -172,14 +187,13 @@ impl CramReader {
 
 	fn assemble(
 		header: Header,
-		reference: Option<Arc<Reference>>,
-		name: &str,
+		environment: Environment,
 		input: Input,
 		region: Option<Interval>,
 		workers: &Workers,
 	) -> Self {
 		Self {
-			environment: Arc::new(Environment::new(&header, reference, name)),
+			environment: Arc::new(environment),
 			header,
 			input,
 			region,

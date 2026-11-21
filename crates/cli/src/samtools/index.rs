@@ -8,9 +8,9 @@ use lexopt::Parser;
 use lexopt::prelude::*;
 
 use crate::failure::{Failure, file};
-use crate::shared::{open, workers};
+use crate::shared::{Target, open, workers};
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: samtools index [-bc] [-m INT] [-@ INT] <in.bam|in.cram> [out.index]
 
 Options:
@@ -23,7 +23,7 @@ Options:
 
 const BAI_MIN_SHIFT: u32 = 14;
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut csi = false;
 	let mut min_shift = BAI_MIN_SHIFT;
 	let mut output: Option<String> = None;
@@ -57,15 +57,13 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 	let workers = workers(threads)?;
 	if is_cram(&path)? {
 		let output = output.unwrap_or_else(|| format!("{path}.crai"));
+		let target = Target::new(Some(&output), &[&path])?;
 		let source = File::open(&path).map_err(|error| file(&path, "reading", &error))?;
 		let index = index_cram(source, |_| Ok::<_, gyrase_reads::cram::Error>(()))?;
-		index.write(
-			File::create(&output).map_err(|error| file(&output, "writing", &error))?,
-			&workers,
-		)?;
-		return Ok(());
+		return target.commit(index.write(target.open()?, &workers)?);
 	}
 	let output = output.unwrap_or_else(|| format!("{path}.{}", if csi { "csi" } else { "bai" }));
+	let target = Target::new(Some(&output), &[&path])?;
 	let mut reader = BamReader::open(open(&path)?, &workers)?;
 	let geometry = if csi {
 		csi_geometry(reader.header(), min_shift)?
@@ -74,12 +72,7 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 	};
 	let index = index_bam(&mut reader, geometry, |_| Ok::<_, gyrase_reads::Error>(()))?;
 	let format = if csi { Format::Csi } else { Format::Bai };
-	index.write(
-		format,
-		File::create(&output).map_err(|error| file(&output, "writing", &error))?,
-		&workers,
-	)?;
-	Ok(())
+	target.commit(index.write(format, target.open()?, &workers)?)
 }
 
 fn is_cram(path: &str) -> Result<bool, Failure> {

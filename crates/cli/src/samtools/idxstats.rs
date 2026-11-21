@@ -7,23 +7,26 @@ use gyrase_reads::{Header, Idxstats};
 use lexopt::Parser;
 use lexopt::prelude::*;
 
-use super::input::{Input, sibling};
+use super::input::{Input, Need, reference, sibling};
 use crate::failure::Failure;
-use crate::shared::{create, workers};
+use crate::shared::{stdout, workers};
 
-pub const USAGE: &str = "\
-Usage: samtools idxstats [-@ INT] <in.bam>
+pub(super) const USAGE: &str = "\
+Usage: samtools idxstats [-@ INT] [-T FILE] <in.bam>|<in.cram>
 
 Options:
-  -@, --threads INT  number of additional threads
+  -T, --reference FILE  reference FASTA, needed for CRAM
+  -@, --threads INT     number of additional threads
 ";
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut threads = None;
+	let mut reference_path: Option<String> = None;
 	let mut path = None;
 	while let Some(arg) = parser.next()? {
 		match arg {
 			Short('@') | Long("threads") => threads = Some(parser.value()?.parse()?),
+			Short('T') | Long("reference") => reference_path = Some(parser.value()?.string()?),
 			Long("help") => return Err(Failure::Help),
 			Value(value) if path.is_none() => path = Some(value.string()?),
 			Value(_) => return Err(Failure::usage("too many arguments")),
@@ -32,7 +35,8 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 	}
 	let path = path.ok_or_else(|| Failure::usage("no input file"))?;
 	let workers = workers(threads)?;
-	let input = Input::open(&path, None, &workers)?;
+	let reference = reference_path.as_deref().map(reference).transpose()?;
+	let input = Input::open(&path, reference.as_ref(), Need::Positions, &workers)?;
 	let header = input.header.clone();
 	let text = match sibling(&path, &[".bai", ".csi"]) {
 		Some(index_path) if input.is_bam() => {
@@ -44,7 +48,7 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 			stats.render(&header)
 		}
 	};
-	let mut out = create(None)?;
+	let mut out = stdout();
 	out.write_all(text.as_bytes())?;
 	out.flush()?;
 	Ok(())

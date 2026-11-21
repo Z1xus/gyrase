@@ -1,4 +1,4 @@
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
@@ -18,6 +18,7 @@ pub struct FaiEntry {
 #[derive(Debug)]
 pub struct Reference {
 	file: File,
+	file_len: u64,
 	entries: Vec<FaiEntry>,
 	contigs: Contigs,
 }
@@ -26,13 +27,24 @@ const CHECKSUM_CHUNK: u64 = 1 << 20;
 
 impl Reference {
 	pub fn open(path: &Path) -> Result<Self, Error> {
+		Self::load(path, false)
+	}
+
+	pub fn open_indexed(path: &Path) -> Result<Self, Error> {
+		Self::load(path, true)
+	}
+
+	fn load(path: &Path, require_index: bool) -> Result<Self, Error> {
 		let file = File::open(path)?;
 		let index_path = index_path(path);
 		let entries = if let Ok(index) = File::open(&index_path) {
 			read_index(BufReader::new(index))?
 		} else {
 			let entries = build_index(BufReader::with_capacity(1 << 20, File::open(path)?))?;
-			let _ = write_index(&index_path, &entries);
+			let written = write_index(&index_path, &entries);
+			if require_index {
+				written?;
+			}
 			entries
 		};
 		let contigs = Contigs::new(entries.iter().map(|entry| Contig {
@@ -40,8 +52,10 @@ impl Reference {
 			length: entry.length,
 			checksum: None,
 		}))?;
+		let file_len = file.metadata()?.len();
 		Ok(Self {
 			file,
+			file_len,
 			entries,
 			contigs,
 		})
@@ -77,10 +91,16 @@ impl Reference {
 		if interval.is_empty() {
 			return Ok(());
 		}
-		let first = entry.byte_offset(interval.start);
-		let last = entry.byte_offset(interval.end - 1) + 1;
-		let len =
-			usize::try_from(last - first).map_err(|_| Error::InvalidFasta { offset: first })?;
+		let invalid = |offset| Error::InvalidFasta { offset };
+		let first = entry
+			.byte_offset(interval.start)
+			.ok_or_else(|| invalid(entry.offset))?;
+		let last = entry
+			.byte_offset(interval.end - 1)
+			.and_then(|last| last.checked_add(1))
+			.filter(|&last| last >= first && last <= self.file_len)
+			.ok_or_else(|| invalid(first))?;
+		let len = usize::try_from(last - first).map_err(|_| invalid(first))?;
 		bases.resize(len, 0);
 		read_exact_at(&self.file, bases, first)?;
 		bases.retain(|byte| !byte.is_ascii_whitespace());
@@ -112,8 +132,11 @@ impl Reference {
 }
 
 impl FaiEntry {
-	fn byte_offset(&self, position: u64) -> u64 {
-		self.offset + position / self.line_bases * self.line_width + position % self.line_bases
+	fn byte_offset(&self, position: u64) -> Option<u64> {
+		(position / self.line_bases)
+			.checked_mul(self.line_width)?
+			.checked_add(position % self.line_bases)?
+			.checked_add(self.offset)
 	}
 }
 
@@ -155,7 +178,18 @@ fn read_index(reader: impl BufRead) -> Result<Vec<FaiEntry>, Error> {
 }
 
 fn write_index(path: &Path, entries: &[FaiEntry]) -> Result<(), Error> {
-	let mut writer = BufWriter::new(OpenOptions::new().write(true).create_new(true).open(path)?);
+	let mut temporary = path.as_os_str().to_owned();
+	temporary.push(format!(".{}.tmp", std::process::id()));
+	let temporary = PathBuf::from(temporary);
+	let written = write_entries(&temporary, entries).and_then(|()| fs::rename(&temporary, path));
+	if written.is_err() {
+		let _ = fs::remove_file(&temporary);
+	}
+	Ok(written?)
+}
+
+fn write_entries(path: &Path, entries: &[FaiEntry]) -> std::io::Result<()> {
+	let mut writer = BufWriter::new(File::create(path)?);
 	for entry in entries {
 		writeln!(
 			writer,
@@ -163,8 +197,7 @@ fn write_index(path: &Path, entries: &[FaiEntry]) -> Result<(), Error> {
 			entry.name, entry.length, entry.offset, entry.line_bases, entry.line_width
 		)?;
 	}
-	writer.flush()?;
-	Ok(())
+	writer.flush()
 }
 
 struct Scan {
@@ -211,17 +244,26 @@ fn build_index(mut reader: impl BufRead) -> Result<Vec<FaiEntry>, Error> {
 		let bases = line
 			.iter()
 			.take_while(|byte| !byte.is_ascii_whitespace())
-			.count() as u64;
+			.count();
+		if !matches!(line.get(bases..), Some(b"" | b"\n" | b"\r\n")) {
+			return Err(Error::InvalidFasta { offset: line_start });
+		}
+		let bases = bases as u64;
 		if bases == 0 {
-			scan.short_line_seen = true;
+			if scan.entry.line_bases == 0 {
+				scan.entry.offset = offset;
+			} else {
+				scan.short_line_seen = true;
+			}
 			continue;
 		}
+		let terminated = line.ends_with(b"\n");
 		if scan.entry.line_bases == 0 {
 			scan.entry.line_bases = bases;
 			scan.entry.line_width = read;
 		} else if scan.short_line_seen
 			|| bases > scan.entry.line_bases
-			|| read - bases != scan.entry.line_width - scan.entry.line_bases
+			|| (terminated && read - bases != scan.entry.line_width - scan.entry.line_bases)
 		{
 			return Err(Error::InvalidFasta { offset: line_start });
 		}

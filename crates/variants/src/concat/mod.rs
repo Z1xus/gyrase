@@ -79,19 +79,20 @@ impl Concat {
 		}
 	}
 
-	pub fn run<R: BufRead, S: Sink>(
+	pub fn run<R: BufRead, S: Sink, E: From<Error>>(
 		&self,
-		inputs: Vec<Reader<R>>,
+		inputs: impl IntoIterator<Item = Result<Reader<R>, E>>,
 		writer: &mut Writer<S>,
 		workers: &Workers,
 		mut placed: impl FnMut(Span, Placed<S::Mark>),
-	) -> Result<u64, Error> {
+	) -> Result<u64, E> {
 		let mut written = 0u64;
 		let mut drain = |out: &mut ConcatOutput| {
 			written += out.encoded.len() as u64;
 			writer.write(&out.encoded, &mut placed)
 		};
 		for reader in inputs {
+			let reader = reader?;
 			let input = self.input(reader.header())?;
 			match reader {
 				Reader::Vcf(mut vcf) => ordered(

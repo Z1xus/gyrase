@@ -7,20 +7,20 @@ use lexopt::Parser;
 
 use crate::failure::Failure;
 
-pub struct Command {
-	pub name: &'static str,
-	pub summary: &'static str,
-	pub usage: &'static str,
-	pub run: fn(Parser) -> Result<(), Failure>,
+pub(crate) struct Command {
+	pub(crate) name: &'static str,
+	pub(crate) summary: &'static str,
+	pub(crate) usage: &'static str,
+	pub(crate) run: fn(Parser) -> Result<(), Failure>,
 }
 
-pub struct Tool {
-	pub name: &'static str,
-	pub commands: &'static [Command],
+pub(crate) struct Tool {
+	pub(crate) name: &'static str,
+	pub(crate) commands: &'static [Command],
 }
 
 impl Tool {
-	pub fn run(&self, args: Vec<OsString>) -> ExitCode {
+	pub(crate) fn run(&self, args: Vec<OsString>) -> ExitCode {
 		let mut args = args.into_iter();
 		let Some(name) = args.next() else {
 			return self.overview(false);

@@ -4,12 +4,12 @@ use std::path::Path;
 use gyrase_genome::Interval;
 use gyrase_index::Index;
 use gyrase_io::Workers;
-use gyrase_variants::{ChunkReader, Header, Reader, Regions, open_regions};
+use gyrase_variants::{ChunkReader, Condition, Header, Reader, Regions, open_regions};
 
 use crate::failure::{Failure, file};
 use crate::shared::open;
 
-pub enum Source {
+pub(super) enum Source {
 	Whole(Reader),
 	Ranged(Reader<ChunkReader>),
 }
@@ -22,10 +22,10 @@ macro_rules! each {
 		}
 	};
 }
-pub(crate) use each;
+pub(super) use each;
 
 impl Source {
-	pub fn header(&self) -> &Header {
+	pub(super) fn header(&self) -> &Header {
 		match self {
 			Self::Whole(reader) => reader.header(),
 			Self::Ranged(reader) => reader.header(),
@@ -34,31 +34,31 @@ impl Source {
 }
 
 #[derive(Default)]
-pub struct Selection {
+pub(super) struct Selection {
 	regions: Vec<String>,
 	targets: Vec<String>,
 }
 
 impl Selection {
-	pub fn regions(&mut self, list: &str) {
+	pub(super) fn regions(&mut self, list: &str) {
 		self.regions.extend(list.split(',').map(single_position));
 	}
 
-	pub fn regions_file(&mut self, path: &str) -> Result<(), Failure> {
+	pub(super) fn regions_file(&mut self, path: &str) -> Result<(), Failure> {
 		self.regions.extend(read_regions(path)?);
 		Ok(())
 	}
 
-	pub fn targets(&mut self, list: &str) {
+	pub(super) fn targets(&mut self, list: &str) {
 		self.targets.extend(list.split(',').map(single_position));
 	}
 
-	pub fn targets_file(&mut self, path: &str) -> Result<(), Failure> {
+	pub(super) fn targets_file(&mut self, path: &str) -> Result<(), Failure> {
 		self.targets.extend(read_regions(path)?);
 		Ok(())
 	}
 
-	pub fn open(
+	pub(super) fn open(
 		&self,
 		path: &str,
 		workers: &Workers,
@@ -109,7 +109,11 @@ fn read_regions(path: &str) -> Result<Vec<String>, Failure> {
 		.is_some_and(|extension| extension.eq_ignore_ascii_case("bed"));
 	let mut regions = Vec::new();
 	for line in text.lines() {
-		if line.is_empty() || line.starts_with(['#', '@']) || line.starts_with("track") {
+		if line.is_empty()
+			|| line.starts_with(['#', '@'])
+			|| line.starts_with("track")
+			|| line.starts_with("browser")
+		{
 			continue;
 		}
 		let mut fields = line.split('\t');
@@ -136,4 +140,17 @@ fn read_regions(path: &str) -> Result<Vec<String>, Failure> {
 		}
 	}
 	Ok(regions)
+}
+
+pub(super) fn set_condition(
+	slot: &mut Option<Condition>,
+	condition: Condition,
+) -> Result<(), Failure> {
+	if slot.is_some() {
+		return Err(Failure::usage(
+			"only one -i or -e expression can be given, and they cannot be combined",
+		));
+	}
+	*slot = Some(condition);
+	Ok(())
 }

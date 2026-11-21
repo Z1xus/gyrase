@@ -21,7 +21,6 @@ gyrase-reads.workspace = true
 gyrase-variants.workspace = true
 ctrlc.workspace = true
 lexopt.workspace = true
-memchr.workspace = true
 
 [lints]
 workspace = true

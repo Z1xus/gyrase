@@ -4,11 +4,11 @@ use gyrase_variants::{Condition, Query, QueryOptions};
 use lexopt::Parser;
 use lexopt::prelude::*;
 
-use super::input::{Selection, each};
+use super::input::{Selection, each, set_condition};
 use crate::failure::Failure;
-use crate::shared::{create, workers};
+use crate::shared::{Target, workers};
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: bcftools query [options] <in.vcf.gz>|<in.bcf>
 
 Options:
@@ -25,7 +25,7 @@ Options:
       --threads INT        number of additional threads
 ";
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut selection = Selection::default();
 	let mut options = QueryOptions::default();
 	let mut format = None;
@@ -48,10 +48,16 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 				selection.targets_file(&parser.value()?.string()?)?;
 			}
 			Short('i') | Long("include") => {
-				options.condition = Some(Condition::Include(parser.value()?.string()?));
+				set_condition(
+					&mut options.condition,
+					Condition::Include(parser.value()?.string()?),
+				)?;
 			}
 			Short('e') | Long("exclude") => {
-				options.condition = Some(Condition::Exclude(parser.value()?.string()?));
+				set_condition(
+					&mut options.condition,
+					Condition::Exclude(parser.value()?.string()?),
+				)?;
 			}
 			Short('s') | Long("samples") => {
 				let list = parser.value()?.string()?;
@@ -64,19 +70,20 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 		}
 	}
 	let workers = workers(threads)?;
-	let (source, regions) = selection.open(path.as_deref().unwrap_or("-"), &workers)?;
-	let mut out = create(output.as_deref())?;
+	let path = path.unwrap_or_else(|| String::from("-"));
+	let target = Target::new(output.as_deref(), &[&path])?;
+	let (source, regions) = selection.open(&path, &workers)?;
 	if list {
+		let mut out = target.open()?;
 		for name in source.header().samples() {
 			writeln!(out, "{name}")?;
 		}
-		out.flush()?;
-		return Ok(());
+		return target.commit(out);
 	}
 	let format = format.ok_or_else(|| Failure::usage("the -f option is required"))?;
 	options.regions = regions;
 	let query = Query::new(source.header(), &format, options)?;
+	let mut out = target.open()?;
 	each!(source, reader => query.run(reader, &mut out, &workers)?);
-	out.flush()?;
-	Ok(())
+	target.commit(out)
 }

@@ -1627,7 +1627,6 @@ dependencies = [
  "gyrase-reads",
  "gyrase-variants",
  "lexopt",
- "memchr",
 ]
 
 [[package]]

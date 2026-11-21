@@ -9,7 +9,7 @@ mod view;
 
 use crate::command::{Command, Tool};
 
-pub const TOOL: Tool = Tool {
+pub(super) const TOOL: Tool = Tool {
 	name: "bcftools",
 	commands: &[
 		Command {

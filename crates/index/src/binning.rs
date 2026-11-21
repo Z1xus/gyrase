@@ -21,11 +21,22 @@ impl Geometry {
 	};
 
 	pub fn new(min_shift: u32, depth: u32) -> Result<Self, Error> {
-		if (1..=MAX_MIN_SHIFT).contains(&min_shift) && (1..=MAX_DEPTH).contains(&depth) {
+		if (1..=MAX_MIN_SHIFT).contains(&min_shift) && (0..=MAX_DEPTH).contains(&depth) {
 			Ok(Self { min_shift, depth })
 		} else {
 			Err(Error::InvalidGeometry { min_shift, depth })
 		}
+	}
+
+	pub fn covering(min_shift: u32, longest: u64) -> Result<Self, Error> {
+		let invalid = |depth| Error::InvalidGeometry { min_shift, depth };
+		if !(1..=MAX_MIN_SHIFT).contains(&min_shift) {
+			return Err(invalid(0));
+		}
+		let depth = (0..=MAX_DEPTH)
+			.find(|depth| longest <= 1 << (min_shift + LEVEL_BITS * depth))
+			.ok_or_else(|| invalid(MAX_DEPTH + 1))?;
+		Self::new(min_shift, depth)
 	}
 
 	pub const fn min_shift(self) -> u32 {

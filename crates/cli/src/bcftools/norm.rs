@@ -9,7 +9,7 @@ use super::input::{Selection, each};
 use super::output::{Collector, Common};
 use crate::failure::Failure;
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: bcftools norm [options] <in.vcf.gz>|<in.bcf>
 
 Options:
@@ -67,10 +67,11 @@ fn mismatch(text: &str) -> Result<Mismatch, Failure> {
 	}
 }
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut common = Common::new();
 	let mut options = NormOptions::default();
 	let mut selection = Selection::default();
+	let mut fasta: Option<String> = None;
 	let mut path = None;
 	while let Some(arg) = parser.next()? {
 		match arg {
@@ -78,10 +79,7 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 			Short('o') | Long("output") => common.output(&mut parser)?,
 			Short('W') | Long("write-index") => common.write_index(&mut parser)?,
 			Long("threads") => common.thread_count(&mut parser)?,
-			Short('f') | Long("fasta-ref") => {
-				let fasta = parser.value()?.string()?;
-				options.reference = Some(Reference::open(Path::new(&fasta))?);
-			}
+			Short('f') | Long("fasta-ref") => fasta = Some(parser.value()?.string()?),
 			Short('m') | Long("multiallelics") => {
 				options.split = Some(splitting(&parser.value()?.string()?)?);
 			}
@@ -108,12 +106,20 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 	}
 	let workers = common.workers()?;
 	let destination = &common.destination;
-	let (source, regions) = selection.open(path.as_deref().unwrap_or("-"), &workers)?;
-	options.format = destination.kind.format;
+	let path = path.unwrap_or_else(|| String::from("-"));
+	let mut inputs = vec![path.as_str()];
+	inputs.extend(fasta.as_deref());
+	let target = common.target(&inputs)?;
+	options.reference = fasta
+		.as_deref()
+		.map(|fasta| Reference::open(Path::new(fasta)))
+		.transpose()?;
+	let (source, regions) = selection.open(&path, &workers)?;
+	options.format = destination.kind.format();
 	options.regions = regions;
 	let norm = Norm::new(source.header(), options);
 	let mut collector = Collector::new();
-	let mut writer = destination.writer(norm.header(), norm.format(), &workers)?;
+	let mut writer = destination.writer(norm.header(), norm.format(), &workers, &target)?;
 	each!(source, reader => norm.run(reader, &mut writer, &workers, collector.mark())?);
-	destination.finish(writer, &collector, norm.header(), &workers)
+	destination.finish(writer, &collector, norm.header(), &workers, &target)
 }

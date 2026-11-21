@@ -7,7 +7,6 @@ use crate::error::Error;
 use crate::header::Header;
 use crate::record::RecordRef;
 
-const LEVEL_BITS: u32 = 3;
 const SLACK: u64 = 256;
 const CSI_MIN_SHIFT: u32 = 14;
 
@@ -48,14 +47,7 @@ pub fn index_layout(header: &Header) -> Result<(Format, Geometry), Error> {
 }
 
 pub fn csi_geometry(header: &Header, min_shift: u32) -> Result<Geometry, Error> {
-	let longest = longest_reference(header);
-	let mut depth = 0;
-	let mut size = 1u64 << min_shift;
-	while longest > size {
-		depth += 1;
-		size <<= LEVEL_BITS;
-	}
-	Ok(Geometry::new(min_shift, depth)?)
+	Ok(Geometry::covering(min_shift, longest_reference(header))?)
 }
 
 pub(crate) fn entry(record: RecordRef<'_>, offsets: Chunk) -> Entry {

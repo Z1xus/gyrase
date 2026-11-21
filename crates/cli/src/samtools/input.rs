@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use gyrase_genome::{Interval, Reference};
 use gyrase_index::{Crai, DEFAULT_MAX_GAP, Index};
-use gyrase_io::Workers;
+use gyrase_io::{Workers, decode, peek};
 use gyrase_reads::cram::{CramBatch, CramReader};
 use gyrase_reads::{
 	BamReader, Flagstat, Header, Query, Record, RecordBatch, RecordRef, SamReader, flagstat,
@@ -14,8 +14,9 @@ use gyrase_reads::{
 use crate::failure::{Failure, file};
 use crate::shared::open;
 
-const BGZF_MAGIC: [u8; 2] = [0x1f, 0x8b];
+const BAM_MAGIC: &[u8] = b"BAM\x01";
 const CRAM_MAGIC: &[u8] = b"CRAM";
+const MAGIC_LENGTH: u64 = 4;
 const BUFFER: usize = 1 << 20;
 
 enum Source {
@@ -37,46 +38,57 @@ struct BamRegions {
 
 struct CramRegions {
 	path: String,
+	multi: bool,
 	crai: Crai,
 	regions: Vec<Interval>,
 	reference: Option<Arc<Reference>>,
 	workers: Workers,
 }
 
-pub struct Input {
-	pub header: Header,
+pub(super) struct Input {
+	pub(super) header: Header,
 	source: Source,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(super) enum Kind {
 	Sam,
 	Bam,
 	Cram,
+	Unknown,
 }
 
-fn kind(head: &[u8]) -> Kind {
-	if head.starts_with(&BGZF_MAGIC) {
+pub(super) fn kind(raw: impl Read) -> Result<Kind, Failure> {
+	let (_, head) = peek(raw, MAGIC_LENGTH)?;
+	Ok(if head.starts_with(BAM_MAGIC) {
 		Kind::Bam
 	} else if head.starts_with(CRAM_MAGIC) {
 		Kind::Cram
-	} else {
+	} else if head.starts_with(b"@") {
 		Kind::Sam
-	}
+	} else {
+		Kind::Unknown
+	})
 }
 
-pub fn reference(path: &str) -> Result<Arc<Reference>, Failure> {
+pub(super) fn reference(path: &str) -> Result<Arc<Reference>, Failure> {
 	Ok(Arc::new(Reference::open(Path::new(path))?))
 }
 
+pub(super) enum Need {
+	Sequences,
+	Positions,
+}
+
 impl Input {
-	pub fn open(
+	pub(super) fn open(
 		path: &str,
 		reference: Option<&Arc<Reference>>,
+		need: Need,
 		workers: &Workers,
 	) -> Result<Self, Failure> {
 		let mut buffered = BufReader::with_capacity(BUFFER, open(path)?);
-		match kind(buffered.fill_buf()?) {
+		match kind(buffered.fill_buf()?)? {
 			Kind::Bam => {
 				let reader = BamReader::open(Box::new(buffered), workers)?;
 				Ok(Self {
@@ -85,15 +97,20 @@ impl Input {
 				})
 			}
 			Kind::Cram => {
-				let reader =
-					CramReader::open(Box::new(buffered), reference.cloned(), path, workers)?;
+				let reader = match (reference, need) {
+					(None, Need::Positions) => {
+						CramReader::open_unbacked(Box::new(buffered), workers)?
+					}
+					_ => CramReader::open(Box::new(buffered), reference.cloned(), path, workers)?,
+				};
 				Ok(Self {
 					header: reader.header().clone(),
 					source: Source::Cram(reader),
 				})
 			}
-			Kind::Sam => {
-				let reader = SamReader::new(Box::new(buffered) as Box<dyn BufRead>)?;
+			Kind::Sam | Kind::Unknown => {
+				let text = decode(Box::new(buffered), workers)?;
+				let reader = SamReader::new(Box::new(text) as Box<dyn BufRead>)?;
 				Ok(Self {
 					header: reader.header().clone(),
 					source: Source::Sam(reader),
@@ -102,30 +119,29 @@ impl Input {
 		}
 	}
 
-	pub fn query(
+	pub(super) fn query(
 		path: &str,
 		regions: &[String],
 		multi: bool,
 		reference: Option<&Arc<Reference>>,
 		workers: &Workers,
 	) -> Result<Self, Failure> {
-		let mut head = Vec::new();
-		File::open(path)
-			.map_err(|error| file(path, "reading", &error))?
-			.take(CRAM_MAGIC.len() as u64)
-			.read_to_end(&mut head)?;
-		match kind(&head) {
+		if path == "-" {
+			return Err(unindexed());
+		}
+		let source = File::open(path).map_err(|error| file(path, "reading", &error))?;
+		match kind(source)? {
 			Kind::Bam => bam_query(path, regions, multi, workers),
 			Kind::Cram => cram_query(path, regions, multi, reference, workers),
-			Kind::Sam => Err(unindexed()),
+			Kind::Sam | Kind::Unknown => Err(unindexed()),
 		}
 	}
 
-	pub fn is_bam(&self) -> bool {
+	pub(super) fn is_bam(&self) -> bool {
 		matches!(self.source, Source::Bam(_))
 	}
 
-	pub fn flagstat(self, workers: &Workers) -> Result<Flagstat, Failure> {
+	pub(super) fn flagstat(self, workers: &Workers) -> Result<Flagstat, Failure> {
 		let mut stats = Flagstat::default();
 		match self.source {
 			Source::Bam(mut reader) => return Ok(flagstat(&mut reader, workers)?),
@@ -137,7 +153,7 @@ impl Input {
 		Ok(stats)
 	}
 
-	pub fn each(
+	pub(super) fn each(
 		self,
 		visit_record: impl FnMut(RecordRef<'_>) -> Result<(), Failure>,
 	) -> Result<(), Failure> {
@@ -177,7 +193,12 @@ fn visit(
 			}
 		}
 		Source::CramRegions(query) => {
-			for region in &query.regions {
+			for (position, region) in query.regions.iter().enumerate() {
+				let earlier = if query.multi {
+					query.regions.get(..position).unwrap_or_default()
+				} else {
+					&[]
+				};
 				let reader = CramReader::query(
 					File::open(&query.path)?,
 					query.reference.clone(),
@@ -186,11 +207,27 @@ fn visit(
 					*region,
 					&query.workers,
 				)?;
-				visit_cram(reader, &mut visit)?;
+				visit_cram(reader, &mut |record| {
+					if overlaps_any(record, earlier) {
+						return Ok(());
+					}
+					visit(record)
+				})?;
 			}
 		}
 	}
 	Ok(())
+}
+
+fn overlaps_any(record: RecordRef<'_>, regions: &[Interval]) -> bool {
+	let (Some(contig), Some(start), Some(end)) =
+		(record.contig(), record.position(), record.reference_end())
+	else {
+		return false;
+	};
+	regions.iter().any(|region| {
+		region.contig == contig && u64::from(start) < region.end && end > region.start
+	})
 }
 
 fn visit_bam(
@@ -237,7 +274,7 @@ fn intervals(header: &Header, regions: &[String]) -> Result<Vec<Interval>, Failu
 		.collect()
 }
 
-pub fn sibling(path: &str, suffixes: &[&str]) -> Option<String> {
+pub(super) fn sibling(path: &str, suffixes: &[&str]) -> Option<String> {
 	let stem = path.rsplit_once('.').map(|(stem, _)| stem);
 	suffixes.iter().find_map(|suffix| {
 		[
@@ -291,6 +328,7 @@ fn cram_query(
 	Ok(Input {
 		source: Source::CramRegions(CramRegions {
 			path: path.to_owned(),
+			multi,
 			crai: Crai::read(File::open(crai_path)?, workers)?,
 			regions,
 			reference: reference.cloned(),

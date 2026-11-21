@@ -12,7 +12,7 @@ use super::output::write_index;
 use crate::failure::Failure;
 use crate::shared::{open, workers};
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: bcftools index [options] <in.bcf>|<in.vcf.gz>
 
 Options:
@@ -36,16 +36,6 @@ fn invalid(what: &str) -> Failure {
 	Failure::new(format!("could not parse {what}"))
 }
 
-fn geometry(min_shift: u32, longest: u64) -> Result<Geometry, Failure> {
-	let mut depth = 0;
-	let mut size = 1u64 << min_shift;
-	while longest > size {
-		depth += 1;
-		size <<= 3;
-	}
-	Ok(Geometry::new(min_shift, depth)?)
-}
-
 fn walk_bcf(reader: &mut BgzfReader, min_shift: u32) -> Result<Index, Failure> {
 	let mut preamble = [0u8; BCF_PREAMBLE + 4];
 	reader.read_exact(&mut preamble)?;
@@ -60,7 +50,7 @@ fn walk_bcf(reader: &mut BgzfReader, min_shift: u32) -> Result<Index, Failure> {
 		.filter_map(|id| header.contig(u32::try_from(id).ok()?)?.length)
 		.max()
 		.map_or(UNKNOWN_LENGTH, |length| length + PADDING);
-	let mut builder = Builder::new(geometry(min_shift, longest)?);
+	let mut builder = Builder::new(Geometry::covering(min_shift, longest)?);
 	let mut sizes = [0u8; 8];
 	let mut record = Vec::new();
 	loop {
@@ -173,7 +163,7 @@ fn walk_vcf(reader: &mut BgzfReader, mut builder: Builder) -> Result<Index, Fail
 	}))
 }
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut format = Format::Csi;
 	let mut force = false;
 	let mut min_shift = MIN_SHIFT;
@@ -217,9 +207,9 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 		let geometry = if format == Format::Tbi {
 			Geometry::new(MIN_SHIFT, TABIX_DEPTH)?
 		} else {
-			geometry(min_shift, UNKNOWN_LENGTH)?
+			Geometry::covering(min_shift, UNKNOWN_LENGTH)?
 		};
 		walk_vcf(&mut reader, Builder::new(geometry))?
 	};
-	write_index(&index, format, &output, &workers)
+	write_index(&index, format, &output, &[&path], &workers)
 }

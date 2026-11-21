@@ -6,17 +6,17 @@ use lexopt::Parser;
 use lexopt::prelude::*;
 
 use crate::failure::Failure;
-use crate::shared::create;
+use crate::shared::Target;
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: samtools faidx <file.fa> [region ...]
 
 Options:
   -o, --output FILE  write FASTA to FILE
-  -n, --length INT   FASTA line length [as in the input]
+  -n, --length INT   FASTA line length, 0 for no wrapping [as in the input]
 ";
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut output = None;
 	let mut width = None;
 	let mut positional = Vec::new();
@@ -34,29 +34,34 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 		.next()
 		.ok_or_else(|| Failure::usage("no input file"))?;
 	let regions: Vec<String> = positional.collect();
-	let reference = Reference::open(Path::new(&path))?;
+	let target = Target::new(output.as_deref(), &[&path])?;
+	let reference = Reference::open_indexed(Path::new(&path)).map_err(|error| {
+		Failure::new(format!("could not build the index of \"{path}\": {error}"))
+	})?;
 	if regions.is_empty() {
 		return Ok(());
 	}
-	let mut out = create(output.as_deref())?;
+	let mut out = target.open()?;
 	let mut bases = Vec::new();
 	for region in &regions {
 		let interval = Interval::parse(region, reference.contigs())
 			.map_err(|_| Failure::new(format!("failed to fetch sequence in {region}")))?;
 		reference.fetch_cased(&interval, &mut bases)?;
 		writeln!(out, ">{region}")?;
-		let line_length = width
-			.or_else(|| {
-				let entry = reference.entries().get(interval.contig.index())?;
-				usize::try_from(entry.line_bases).ok()
-			})
-			.unwrap_or(1)
-			.max(1);
+		let line_length = match width {
+			Some(0) => usize::MAX,
+			Some(width) => width,
+			None => reference
+				.entries()
+				.get(interval.contig.index())
+				.and_then(|entry| usize::try_from(entry.line_bases).ok())
+				.unwrap_or(1)
+				.max(1),
+		};
 		for line in bases.chunks(line_length) {
 			out.write_all(line)?;
 			out.write_all(b"\n")?;
 		}
 	}
-	out.flush()?;
-	Ok(())
+	target.commit(out)
 }

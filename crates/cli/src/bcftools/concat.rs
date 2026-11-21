@@ -6,7 +6,7 @@ use super::output::{Collector, Common};
 use crate::failure::{Failure, file};
 use crate::shared::open;
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: bcftools concat [options] <a.vcf.gz> [<b.vcf.gz> ...]
 
 Options:
@@ -17,7 +17,7 @@ Options:
       --threads INT          number of additional threads
 ";
 
-pub fn list(path: &str) -> Result<Vec<String>, Failure> {
+pub(super) fn list(path: &str) -> Result<Vec<String>, Failure> {
 	let text = std::fs::read_to_string(path).map_err(|error| file(path, "reading", &error))?;
 	Ok(text
 		.lines()
@@ -27,7 +27,7 @@ pub fn list(path: &str) -> Result<Vec<String>, Failure> {
 		.collect())
 }
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut common = Common::new();
 	let mut paths = Vec::new();
 	while let Some(arg) = parser.next()? {
@@ -45,22 +45,29 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 	if paths.is_empty() {
 		return Err(Failure::usage("no input files"));
 	}
+	if paths.iter().any(|path| path == "-") {
+		return Err(Failure::new("standard input cannot be an input"));
+	}
 	let workers = common.workers()?;
 	let destination = &common.destination;
-	let readers = paths
+	let headers = paths
 		.iter()
-		.map(|path| Ok(Reader::open(open(path)?, &workers)?))
+		.map(|path| Ok(Reader::open(open(path)?, &workers)?.header().clone()))
 		.collect::<Result<Vec<_>, Failure>>()?;
-	let headers: Vec<_> = readers.iter().map(Reader::header).collect();
 	let concat = Concat::new(
-		&headers,
+		&headers.iter().collect::<Vec<_>>(),
 		ConcatOptions {
 			fidelity: Fidelity::Canonical,
-			format: destination.kind.format,
+			format: destination.kind.format(),
 		},
 	)?;
+	let inputs: Vec<&str> = paths.iter().map(String::as_str).collect();
+	let target = common.target(&inputs)?;
 	let mut collector = Collector::new();
-	let mut writer = destination.writer(concat.header(), concat.format(), &workers)?;
+	let mut writer = destination.writer(concat.header(), concat.format(), &workers, &target)?;
+	let readers = paths
+		.iter()
+		.map(|path| Ok::<_, Failure>(Reader::open(open(path)?, &workers)?));
 	concat.run(readers, &mut writer, &workers, collector.mark())?;
-	destination.finish(writer, &collector, concat.header(), &workers)
+	destination.finish(writer, &collector, concat.header(), &workers, &target)
 }

@@ -7,9 +7,9 @@ use lexopt::Parser;
 use lexopt::prelude::*;
 
 use crate::failure::Failure;
-use crate::shared::create;
+use crate::shared::Target;
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: samtools dict [options] <file.fa>
 
 Options:
@@ -21,7 +21,7 @@ Options:
   -u, --uri STR       URI [file:///abs/path/to/file.fa]
 ";
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut assembly = None;
 	let mut species = None;
 	let mut uri = None;
@@ -44,10 +44,11 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 		}
 	}
 	let path = path.ok_or_else(|| Failure::usage("no input file"))?;
+	let target = Target::new(output.as_deref(), &[&path])?;
 	let reference = Reference::open(Path::new(&path))?;
 	let uri = match uri {
 		Some(uri) => uri,
-		None => format!("file://{}", std::fs::canonicalize(&path)?.display()),
+		None => file_uri(Path::new(&path))?,
 	};
 	let mut text = String::new();
 	if header {
@@ -81,8 +82,19 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 		}
 		text.push('\n');
 	}
-	let mut out = create(output.as_deref())?;
+	let mut out = target.open()?;
 	out.write_all(text.as_bytes())?;
-	out.flush()?;
-	Ok(())
+	target.commit(out)
+}
+
+fn file_uri(path: &Path) -> Result<String, Failure> {
+	let canonical = std::fs::canonicalize(path)?
+		.to_string_lossy()
+		.replace('\\', "/");
+	let plain = canonical.strip_prefix("//?/").unwrap_or(&canonical);
+	Ok(if plain.starts_with('/') {
+		format!("file://{plain}")
+	} else {
+		format!("file:///{plain}")
+	})
 }

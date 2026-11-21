@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::path::Path;
 
 use gyrase_index::{Format as IndexFormat, Index};
 use gyrase_io::{BgzfWriter, BlockPosition, Finished, Level, Workers};
@@ -8,113 +7,109 @@ use gyrase_variants::{
 };
 use lexopt::{Parser, ValueExt};
 
-use crate::failure::{Failure, file};
-use crate::shared::{Output, create, workers};
+use crate::failure::Failure;
+use crate::shared::{Output, Target, workers};
 
-#[derive(Clone, Copy)]
-pub struct Kind {
-	pub format: Format,
-	pub compressed: bool,
-	pub level: Level,
-}
-
-impl Default for Kind {
-	fn default() -> Self {
-		Self {
-			format: Format::Vcf,
-			compressed: false,
-			level: Level::DEFAULT,
-		}
-	}
+#[derive(Clone, Copy, Default)]
+pub(super) enum Kind {
+	#[default]
+	Vcf,
+	VcfGz(Level),
+	Bcf(Level),
 }
 
 impl Kind {
-	pub fn parse(text: &str) -> Result<Self, Failure> {
+	fn parse(text: &str) -> Result<Self, Failure> {
 		let invalid = || Failure::usage(format!("the output type \"{text}\" is not recognised"));
 		let mut chars = text.chars();
-		let mut kind = match chars.next().ok_or_else(invalid)? {
-			'v' => Self::default(),
-			'z' => Self {
-				compressed: true,
-				..Self::default()
-			},
-			'b' => Self {
-				format: Format::Bcf,
-				compressed: true,
-				..Self::default()
-			},
-			'u' => Self {
-				format: Format::Bcf,
-				compressed: true,
-				level: Level::STORED,
-			},
+		let kind = match chars.next().ok_or_else(invalid)? {
+			'v' => Self::Vcf,
+			'z' => Self::VcfGz(Level::DEFAULT),
+			'b' => Self::Bcf(Level::DEFAULT),
+			'u' => Self::Bcf(Level::STORED),
 			_ => return Err(invalid()),
 		};
-		if let Some(digit) = chars.next() {
-			let level = digit
-				.to_digit(10)
-				.and_then(|digit| u8::try_from(digit).ok())
-				.and_then(Level::new)
-				.ok_or_else(invalid)?;
-			if chars.next().is_some() {
-				return Err(invalid());
-			}
-			if kind.compressed {
-				kind.level = level;
-			}
+		let Some(digit) = chars.next() else {
+			return Ok(kind);
+		};
+		let level = digit
+			.to_digit(10)
+			.and_then(|digit| u8::try_from(digit).ok())
+			.and_then(Level::new)
+			.ok_or_else(invalid)?;
+		if chars.next().is_some() {
+			return Err(invalid());
 		}
-		Ok(kind)
+		Ok(match kind {
+			Self::Vcf => Self::Vcf,
+			Self::VcfGz(_) => Self::VcfGz(level),
+			Self::Bcf(_) => Self::Bcf(level),
+		})
+	}
+
+	pub(super) fn format(self) -> Format {
+		match self {
+			Self::Vcf | Self::VcfGz(_) => Format::Vcf,
+			Self::Bcf(_) => Format::Bcf,
+		}
 	}
 }
 
 #[derive(Default)]
-pub struct Destination {
-	pub path: Option<String>,
-	pub kind: Kind,
-	pub index: Option<IndexFormat>,
+pub(super) struct Destination {
+	pub(super) path: Option<String>,
+	pub(super) kind: Kind,
+	index: Option<IndexFormat>,
 }
 
-pub struct Common {
-	pub destination: Destination,
-	pub threads: Option<usize>,
+pub(super) struct Common {
+	pub(super) destination: Destination,
+	threads: Option<usize>,
 }
 
 impl Common {
-	pub fn new() -> Self {
+	pub(super) fn new() -> Self {
 		Self {
 			destination: Destination::default(),
 			threads: None,
 		}
 	}
 
-	pub fn output_type(&mut self, parser: &mut Parser) -> Result<(), Failure> {
+	pub(super) fn output_type(&mut self, parser: &mut Parser) -> Result<(), Failure> {
 		self.destination.kind = Kind::parse(&parser.value()?.string()?)?;
 		Ok(())
 	}
 
-	pub fn output(&mut self, parser: &mut Parser) -> Result<(), Failure> {
-		self.destination.path = Some(parser.value()?.string()?);
+	pub(super) fn output(&mut self, parser: &mut Parser) -> Result<(), Failure> {
+		self.destination.path = Some(parser.value()?.string()?).filter(|path| path != "-");
 		Ok(())
 	}
 
-	pub fn write_index(&mut self, parser: &mut Parser) -> Result<(), Failure> {
+	pub(super) fn write_index(&mut self, parser: &mut Parser) -> Result<(), Failure> {
 		let format = parser.optional_value().map(ValueExt::string).transpose()?;
-		self.destination.index = Some(index_format(format.as_deref())?);
+		let format = format
+			.as_deref()
+			.map(|text| text.strip_prefix('=').unwrap_or(text));
+		self.destination.index = Some(index_format(format)?);
 		Ok(())
 	}
 
-	pub fn thread_count(&mut self, parser: &mut Parser) -> Result<(), Failure> {
+	pub(super) fn target(&self, inputs: &[&str]) -> Result<Target, Failure> {
+		Target::new(self.destination.path.as_deref(), inputs)
+	}
+
+	pub(super) fn thread_count(&mut self, parser: &mut Parser) -> Result<(), Failure> {
 		self.threads = Some(parser.value()?.parse()?);
 		Ok(())
 	}
 
-	pub fn workers(&self) -> Result<Workers, Failure> {
+	pub(super) fn workers(&self) -> Result<Workers, Failure> {
 		self.destination.check()?;
 		workers(self.threads)
 	}
 }
 
-pub fn index_format(text: Option<&str>) -> Result<IndexFormat, Failure> {
+pub(super) fn index_format(text: Option<&str>) -> Result<IndexFormat, Failure> {
 	match text {
 		None | Some("csi") => Ok(IndexFormat::Csi),
 		Some("tbi") => Ok(IndexFormat::Tbi),
@@ -124,12 +119,12 @@ pub fn index_format(text: Option<&str>) -> Result<IndexFormat, Failure> {
 	}
 }
 
-pub enum Dest {
+pub(super) enum Dest {
 	Plain(PlainSink<Output>),
 	Bgzf(BgzfWriter<Output>),
 }
 
-pub enum Done {
+pub(super) enum Done {
 	Plain(Output),
 	Bgzf(Finished<Output>),
 }
@@ -176,18 +171,18 @@ impl Sink for Dest {
 	}
 }
 
-pub struct Collector {
+pub(super) struct Collector {
 	inner: IndexCollector,
 }
 
 impl Collector {
-	pub fn new() -> Self {
+	pub(super) fn new() -> Self {
 		Self {
 			inner: IndexCollector::new(),
 		}
 	}
 
-	pub fn mark(&mut self) -> impl FnMut(Span, Placed<Option<BlockPosition>>) + '_ {
+	pub(super) fn mark(&mut self) -> impl FnMut(Span, Placed<Option<BlockPosition>>) + '_ {
 		|span, placed| {
 			if let (Some(begin), Some(end)) = (placed.begin, placed.end) {
 				self.inner.push(span, Placed { begin, end });
@@ -197,82 +192,90 @@ impl Collector {
 }
 
 impl Destination {
-	pub fn check(&self) -> Result<(), Failure> {
+	fn check(&self) -> Result<(), Failure> {
 		match (&self.index, &self.path) {
 			(Some(_), None) => Err(Failure::new(
 				"the index cannot be written to standard output",
 			)),
-			(Some(_), Some(_)) if !self.kind.compressed => Err(Failure::new(
+			(Some(_), Some(_)) if matches!(self.kind, Kind::Vcf) => Err(Failure::new(
 				"an index needs compressed output, use -O z or -O b",
 			)),
-			(Some(IndexFormat::Tbi), Some(_)) if self.kind.format == Format::Bcf => {
+			(Some(IndexFormat::Tbi), Some(_)) if self.kind.format() == Format::Bcf => {
 				Err(Failure::new("a tbi index cannot index BCF output"))
 			}
 			_ => Ok(()),
 		}
 	}
 
-	pub fn writer(
+	pub(super) fn writer(
 		&self,
 		header: &Header,
 		format: Format,
 		workers: &Workers,
+		target: &Target,
 	) -> Result<Writer<Dest>, Failure> {
-		Ok(Writer::new(self.sink(workers)?, header, format)?)
+		Ok(Writer::new(self.sink(workers, target)?, header, format)?)
 	}
 
-	pub fn bare(&self, workers: &Workers) -> Result<Writer<Dest>, Failure> {
-		Ok(Writer::without_header(self.sink(workers)?))
+	pub(super) fn bare(&self, workers: &Workers, target: &Target) -> Result<Writer<Dest>, Failure> {
+		Ok(Writer::without_header(self.sink(workers, target)?))
 	}
 
-	fn sink(&self, workers: &Workers) -> Result<Dest, Failure> {
-		let out = create(self.path.as_deref())?;
-		Ok(if self.kind.compressed {
-			Dest::Bgzf(BgzfWriter::new(out, self.kind.level, workers))
-		} else {
-			Dest::Plain(PlainSink::new(out))
+	fn sink(&self, workers: &Workers, target: &Target) -> Result<Dest, Failure> {
+		let out = target.open()?;
+		Ok(match self.kind {
+			Kind::Vcf => Dest::Plain(PlainSink::new(out)),
+			Kind::VcfGz(level) | Kind::Bcf(level) => {
+				Dest::Bgzf(BgzfWriter::new(out, level, workers))
+			}
 		})
 	}
 
-	pub fn finish(
+	pub(super) fn finish(
 		&self,
 		writer: Writer<Dest>,
 		collector: &Collector,
 		header: &Header,
 		workers: &Workers,
+		target: &Target,
 	) -> Result<(), Failure> {
 		match writer.finish()? {
-			Done::Plain(mut out) => out.flush()?,
-			Done::Bgzf(mut finished) => {
-				if let (Some(format), Some(path)) = (self.index, &self.path) {
-					let kind = if self.kind.format == Format::Bcf {
-						IndexKind::Bcf
-					} else {
-						IndexKind::Vcf
-					};
-					let index = collector.inner.build(&finished, header, kind)?;
-					let extension = if format == IndexFormat::Tbi {
-						"tbi"
-					} else {
-						"csi"
-					};
-					write_index(&index, format, &format!("{path}.{extension}"), workers)?;
+			Done::Plain(out) => target.commit(out),
+			Done::Bgzf(finished) => {
+				let index = match (self.index, &self.path) {
+					(Some(format), Some(path)) => {
+						let kind = if self.kind.format() == Format::Bcf {
+							IndexKind::Bcf
+						} else {
+							IndexKind::Vcf
+						};
+						let index = collector.inner.build(&finished, header, kind)?;
+						let extension = if format == IndexFormat::Tbi {
+							"tbi"
+						} else {
+							"csi"
+						};
+						Some((index, format, format!("{path}.{extension}")))
+					}
+					_ => None,
+				};
+				target.commit(finished.inner)?;
+				match index {
+					Some((index, format, path)) => write_index(&index, format, &path, &[], workers),
+					None => Ok(()),
 				}
-				finished.inner.flush()?;
 			}
 		}
-		Ok(())
 	}
 }
 
-pub fn write_index(
+pub(super) fn write_index(
 	index: &Index,
 	format: IndexFormat,
 	path: &str,
+	inputs: &[&str],
 	workers: &Workers,
 ) -> Result<(), Failure> {
-	let out =
-		std::fs::File::create(Path::new(path)).map_err(|error| file(path, "writing", &error))?;
-	index.write(format, out, workers)?;
-	Ok(())
+	let target = Target::new(Some(path), inputs)?;
+	target.commit(index.write(format, target.open()?, workers)?)
 }

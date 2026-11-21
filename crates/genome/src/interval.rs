@@ -51,9 +51,12 @@ impl Interval {
 			Some((first, last)) => (first, last),
 			None => (range, ""),
 		};
-		let start = parse_coordinate(first)
-			.ok_or_else(invalid)?
-			.saturating_sub(1);
+		let start = match first.trim() {
+			"" if range.contains('-') => 0,
+			first => parse_coordinate(first)
+				.ok_or_else(invalid)?
+				.saturating_sub(1),
+		};
 		let end = match last.trim() {
 			"" => length,
 			last => parse_coordinate(last).ok_or_else(invalid)?.min(length),

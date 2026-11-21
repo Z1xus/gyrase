@@ -7,7 +7,7 @@ use super::output::{Collector, Common};
 use crate::failure::Failure;
 use crate::shared::open;
 
-pub const USAGE: &str = "\
+pub(super) const USAGE: &str = "\
 Usage: bcftools merge [options] <a.vcf.gz> <b.vcf.gz> [...]
 
 Options:
@@ -33,7 +33,7 @@ fn collapse(text: &str) -> Result<Collapse, Failure> {
 	}
 }
 
-pub fn run(mut parser: Parser) -> Result<(), Failure> {
+pub(super) fn run(mut parser: Parser) -> Result<(), Failure> {
 	let mut common = Common::new();
 	let mut paths = Vec::new();
 	let mut merging = Collapse::default();
@@ -63,12 +63,14 @@ pub fn run(mut parser: Parser) -> Result<(), Failure> {
 	let merge = Merge::new(
 		&headers,
 		MergeOptions {
-			format: destination.kind.format,
+			format: destination.kind.format(),
 			collapse: merging,
 		},
 	)?;
+	let inputs: Vec<&str> = paths.iter().map(String::as_str).collect();
+	let target = common.target(&inputs)?;
 	let mut collector = Collector::new();
-	let mut writer = destination.writer(merge.header(), merge.format(), &workers)?;
+	let mut writer = destination.writer(merge.header(), merge.format(), &workers, &target)?;
 	merge.run(readers, &mut writer, collector.mark())?;
-	destination.finish(writer, &collector, merge.header(), &workers)
+	destination.finish(writer, &collector, merge.header(), &workers, &target)
 }

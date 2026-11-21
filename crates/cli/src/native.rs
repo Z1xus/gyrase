@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -22,7 +23,7 @@ Options:
   -h, --help           show this help
 ";
 
-pub fn main(args: Vec<OsString>) -> ExitCode {
+pub(crate) fn main(args: Vec<OsString>) -> ExitCode {
 	match run(args) {
 		Ok(()) => ExitCode::SUCCESS,
 		Err(Failure::Help) => {
@@ -68,28 +69,54 @@ fn run(args: Vec<OsString>) -> Result<(), Failure> {
 	let handler = cancel.clone();
 	ctrlc::set_handler(move || handler.cancel())
 		.map_err(|error| Failure::new(error.to_string()))?;
-	for sample in samples(inputs)? {
-		let folder = output.clone().unwrap_or_else(|| {
-			sample
-				.path()
-				.parent()
-				.filter(|parent| !parent.as_os_str().is_empty())
-				.map_or_else(|| PathBuf::from("."), Path::to_owned)
-		});
-		let plan = Plan::new(
-			sample,
-			&store,
-			&Request {
-				output: folder,
-				formats: formats.clone(),
-			},
-		)?;
+	let plans = samples(inputs)?
+		.into_iter()
+		.map(|sample| {
+			let folder = output.clone().unwrap_or_else(|| {
+				sample
+					.path()
+					.parent()
+					.filter(|parent| !parent.as_os_str().is_empty())
+					.map_or_else(|| PathBuf::from("."), Path::to_owned)
+			});
+			Plan::new(
+				sample,
+				&store,
+				&Request {
+					output: folder,
+					formats: formats.clone(),
+				},
+			)
+		})
+		.collect::<Result<Vec<_>, _>>()?;
+	let mut used: HashSet<&Path> = paths.iter().map(PathBuf::as_path).collect();
+	if let Some(path) = plans
+		.iter()
+		.flat_map(written)
+		.find(|path| !used.insert(path))
+	{
+		return Err(Failure::new(format!(
+			"{}: would be written more than once",
+			path.display()
+		)));
+	}
+	for plan in &plans {
 		let mut line = Line::new();
 		let report = plan.run(&store, &resources, &cancel, |progress| line.show(progress));
 		line.clear();
-		summarize(&plan, &report?)?;
+		summarize(plan, &report?)?;
 	}
 	Ok(())
+}
+
+fn written(plan: &Plan) -> impl Iterator<Item = &Path> {
+	let outputs = &plan.outputs;
+	outputs
+		.alignments
+		.iter()
+		.chain(&outputs.variants)
+		.chain(outputs.raw.iter().map(|(_, path)| path))
+		.map(PathBuf::as_path)
 }
 
 fn parse_formats(list: &str) -> Result<Vec<Format>, Failure> {
