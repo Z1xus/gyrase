@@ -19,7 +19,7 @@ use crate::markdup::{MarkSettings, MarkStats, Marker, is_duplicate, set_duplicat
 use crate::record::RecordRef;
 
 const CHECK_EVERY: usize = 1 << 16;
-const POSITION_LIMIT: u64 = 1 << 31;
+const POSITION_LIMIT: u64 = (1 << 31) - 1;
 
 #[derive(Debug)]
 pub struct Sorter<'w> {
@@ -209,7 +209,7 @@ impl Records {
 
 	pub fn count(&self, contig: u32, start: u64, end: u64) -> usize {
 		let (first, last) = self.candidates(contig, start, end);
-		last - first
+		last.saturating_sub(first)
 	}
 
 	pub fn overlapping(
