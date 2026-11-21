@@ -1,5 +1,5 @@
 use super::header::{TEXT_STOP, TagKey};
-use super::layout::put_itf8;
+use super::layout::{int, put_itf8};
 use super::series::{Series, Streams};
 use crate::cram::Error;
 use crate::cram::decode::{Environment, advance};
@@ -16,8 +16,11 @@ const NO_READ_GROUP: i32 = -1;
 const NO_MATE: i32 = -1;
 const PSEUDO_TAG: [u8; 2] = *b"cF";
 
-fn int(value: usize) -> Result<i32, Error> {
-	i32::try_from(value).map_err(|_| Error::IntegerOverflow)
+fn one_based(position: u64) -> Result<i32, Error> {
+	i32::try_from(position)
+		.ok()
+		.and_then(|position| position.checked_add(1))
+		.ok_or(Error::IntegerOverflow)
 }
 
 fn substitution(expected: u8, base: u8) -> Option<u8> {
@@ -67,7 +70,7 @@ struct Walk {
 
 impl Walk {
 	fn feature(&mut self, streams: &mut Streams, read: usize, code: u8) -> Result<(), Error> {
-		let position = int(read)? + 1;
+		let position = int(read)?.checked_add(1).ok_or(Error::IntegerOverflow)?;
 		streams.byte(Series::FeatureCode, code);
 		streams.int(Series::FeaturePosition, position - self.previous);
 		self.previous = position;
@@ -83,6 +86,7 @@ pub(super) struct RecordEncoder<'a> {
 	pub(super) streams: Streams,
 	pub(super) dictionary: Dictionary,
 	last_position: i32,
+	sequenced: bool,
 	bases: Vec<u8>,
 	md: Vec<u8>,
 	reference_bases: Vec<u8>,
@@ -104,6 +108,7 @@ impl<'a> RecordEncoder<'a> {
 			streams: Streams::new(),
 			dictionary: Dictionary::default(),
 			last_position: start,
+			sequenced: true,
 			bases: Vec::new(),
 			md: Vec::new(),
 			reference_bases: Vec::new(),
@@ -116,14 +121,21 @@ impl<'a> RecordEncoder<'a> {
 
 	pub(super) fn encode(&mut self, record: RecordRef<'_>) -> Result<(), Error> {
 		let flags = record.flags().bits();
+		let mapped = flags & FLAG_UNMAPPED == 0;
 		let length = record.sequence().len();
+		self.sequenced = length > 0;
+		let read_length = if mapped && !self.sequenced {
+			usize::try_from(record.cigar().query_len()).map_err(|_| Error::IntegerOverflow)?
+		} else {
+			length
+		};
 		let qualities = record.qualities();
 		let has_qualities = !qualities.is_empty() && !qualities.is_missing();
 		let mut compression = CF_DETACHED;
 		if has_qualities {
 			compression |= CF_QUALITIES;
 		}
-		if length == 0 {
+		if !self.sequenced {
 			compression |= CF_NO_SEQUENCE;
 		}
 		self.streams.int(Series::Flags, i32::from(flags));
@@ -131,9 +143,9 @@ impl<'a> RecordEncoder<'a> {
 			Series::CompressionFlags,
 			i32::try_from(compression).map_err(|_| Error::IntegerOverflow)?,
 		);
-		self.streams.int(Series::ReadLength, int(length)?);
+		self.streams.int(Series::ReadLength, int(read_length)?);
 		let position = match record.position() {
-			Some(position) => i32::try_from(position).map_err(|_| Error::IntegerOverflow)? + 1,
+			Some(position) => one_based(u64::from(position))?,
 			None if record.contig().is_none() => 0,
 			None => return Err(Error::Unsupported("placed record without a position")),
 		};
@@ -141,15 +153,21 @@ impl<'a> RecordEncoder<'a> {
 			.int(Series::Position, position - self.last_position);
 		self.last_position = position;
 		self.bases.clear();
-		record.sequence().decode_into(&mut self.bases);
-		let mapped = flags & FLAG_UNMAPPED == 0;
-		let distance = if mapped {
+		if self.sequenced {
+			record.sequence().decode_into(&mut self.bases);
+		} else {
+			self.bases.resize(read_length, b'N');
+		}
+		let distance = if mapped && self.sequenced {
 			Some(self.regenerate(record, position, length)?)
 		} else {
 			None
 		};
 		let group = self.tags(record, distance)?;
 		self.streams.int(Series::ReadGroup, group);
+		if record.name().contains(&0) {
+			return Err(Error::Unsupported("read name with a NUL byte"));
+		}
 		self.streams.terminated(Series::Name, record.name());
 		self.mate(record, flags)?;
 		if mapped {
@@ -212,6 +230,9 @@ impl<'a> RecordEncoder<'a> {
 		} else {
 			rest
 		};
+		if text && (body.contains(&0) || body.contains(&TEXT_STOP)) {
+			return Err(Error::Unsupported("tag text with a tab or NUL byte"));
+		}
 		let start = self.tag_bytes.len();
 		self.tag_bytes.extend_from_slice(body);
 		self.entries.push(TagEntry {
@@ -310,7 +331,7 @@ impl<'a> RecordEncoder<'a> {
 		};
 		self.streams.int(Series::MateReference, reference);
 		let position = match record.mate_position() {
-			Some(position) => i32::try_from(position).map_err(|_| Error::IntegerOverflow)? + 1,
+			Some(position) => one_based(u64::from(position))?,
 			None => 0,
 		};
 		self.streams.int(Series::MatePosition, position);
@@ -379,6 +400,9 @@ impl<'a> RecordEncoder<'a> {
 		reference: u64,
 		length: usize,
 	) -> Result<(), Error> {
+		if !self.sequenced {
+			return Ok(());
+		}
 		let window = self.window.ok_or(Error::ReferenceRequired)?;
 		self.reference_bases.resize(length, 0);
 		window.copy(reference, &mut self.reference_bases)?;

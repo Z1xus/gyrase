@@ -42,7 +42,7 @@ impl SliceHeader {
 			.ok_or_else(malformed)?;
 		let content_ids = usize::try_from(cursor.itf8()?)
 			.ok()
-			.filter(|count| (1..MAX_SLICE_BLOCKS).contains(count))
+			.filter(|count| (0..MAX_SLICE_BLOCKS).contains(count))
 			.ok_or_else(malformed)?;
 		for _ in 0..content_ids {
 			cursor.itf8()?;

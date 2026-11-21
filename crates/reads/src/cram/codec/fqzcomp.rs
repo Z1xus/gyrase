@@ -1,6 +1,6 @@
-use super::check_len;
 use super::model::Model;
 use super::range_coder::RangeDecoder;
+use super::{check_expansion, check_len, first_reserve};
 use crate::cram::cursor::Cursor;
 use crate::cram::{Codec, Error};
 
@@ -247,6 +247,7 @@ pub(crate) fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 	let mut cursor = Cursor::new(input);
 	let len = check_len(cursor.uint7()?.into())?;
 	let global = Global::read(&mut cursor)?;
+	check_expansion(len, cursor.remaining())?;
 	let mut decoder = RangeDecoder::new(cursor.rest())?;
 	let max_symbol = global.max_symbol() + 1;
 	let mut models = Models {
@@ -256,7 +257,7 @@ pub(crate) fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 		selector: Model::new(global.selector_count + 1),
 		duplicate: Model::new(2),
 	};
-	let mut output: Vec<u8> = Vec::with_capacity(len);
+	let mut output = first_reserve(len);
 	let mut records: Vec<(usize, u32)> = Vec::new();
 	let mut state = ReadState {
 		first_len: true,

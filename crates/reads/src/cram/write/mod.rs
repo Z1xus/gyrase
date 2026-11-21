@@ -63,7 +63,7 @@ impl<W: Write> CramWriter<W> {
 		);
 		payload.extend_from_slice(text.as_bytes());
 		let mut body = Vec::new();
-		raw_block(&mut body, BlockKind::FileHeader, 0, &payload);
+		raw_block(&mut body, BlockKind::FileHeader, 0, &payload)?;
 		let fields = ContainerFields {
 			reference: 0,
 			start: 0,
@@ -74,7 +74,7 @@ impl<W: Write> CramWriter<W> {
 			blocks: 1,
 			landmarks: Vec::new(),
 		};
-		start.extend_from_slice(&container_header(&fields, body.len()));
+		start.extend_from_slice(&container_header(&fields, body.len())?);
 		start.extend_from_slice(&body);
 		sink.write_all(&start)?;
 		Ok(Self {
@@ -110,7 +110,7 @@ impl<W: Write> CramWriter<W> {
 			BlockKind::CompressionHeader,
 			0,
 			&EMPTY_COMPRESSION_HEADER,
-		);
+		)?;
 		let fields = ContainerFields {
 			reference: -1,
 			start: EOF_START,
@@ -122,7 +122,7 @@ impl<W: Write> CramWriter<W> {
 			landmarks: Vec::new(),
 		};
 		self.sink
-			.write_all(&container_header(&fields, body.len()))?;
+			.write_all(&container_header(&fields, body.len())?)?;
 		self.sink.write_all(&body)?;
 		self.sink.flush()?;
 		Ok(Finished {
@@ -161,7 +161,7 @@ impl<W: Write> CramWriter<W> {
 	}
 
 	fn write_container(&mut self, container: &Encoded) -> Result<(), Error> {
-		let header = container_header(&container.fields, container.body.len());
+		let header = container_header(&container.fields, container.body.len())?;
 		self.sink.write_all(&header)?;
 		self.sink.write_all(&container.body)?;
 		let reference = u32::try_from(container.fields.reference)

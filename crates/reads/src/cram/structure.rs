@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 
 use libdeflater::Crc;
 
@@ -10,7 +10,6 @@ use crate::cram::cursor::Cursor;
 const MAGIC: [u8; 4] = *b"CRAM";
 const FILE_ID_LEN: usize = 20;
 const EOF_START: i32 = 4_542_278;
-const HEADER_PROBE: usize = 64;
 const MAX_LANDMARKS: usize = 1 << 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,109 +50,91 @@ impl ContainerHeader {
 	}
 
 	pub(crate) fn read(reader: &mut impl Read) -> Result<Option<(Self, Vec<u8>)>, Error> {
-		let mut head = vec![0; HEADER_PROBE];
-		let got = read_up_to(reader, &mut head)?;
+		let Some(header) = Self::read_head(reader)? else {
+			return Ok(None);
+		};
+		let mut body = Vec::new();
+		reader.take(header.length as u64).read_to_end(&mut body)?;
+		if body.len() != header.length {
+			return Err(Error::Truncated);
+		}
+		Ok(Some((header, body)))
+	}
+
+	pub(crate) fn read_head(reader: &mut impl Read) -> Result<Option<Self>, Error> {
+		let mut raw = vec![0; 4];
+		let got = read_up_to(reader, &mut raw)?;
 		if got == 0 {
 			return Ok(None);
 		}
-		head.truncate(got);
-		loop {
-			match Self::parse(&head) {
-				Ok((header, consumed)) => {
-					let leftover = head.get(consumed..).ok_or(Error::Truncated)?;
-					let mut body = Vec::with_capacity(header.length);
-					body.extend_from_slice(
-						leftover
-							.get(..leftover.len().min(header.length))
-							.ok_or(Error::Truncated)?,
-					);
-					let missing = header.length - body.len();
-					reader.take(missing as u64).read_to_end(&mut body)?;
-					if body.len() != header.length {
-						return Err(Error::Truncated);
-					}
-					return Ok(Some((header, body)));
-				}
-				Err(Error::Truncated) => {
-					let before = head.len();
-					head.resize(before + HEADER_PROBE, 0);
-					let got = read_up_to(reader, head.get_mut(before..).ok_or(Error::Truncated)?)?;
-					if got == 0 {
-						return Err(Error::Truncated);
-					}
-					head.truncate(before + got);
-				}
-				Err(error) => return Err(error),
-			}
+		if got != raw.len() {
+			return Err(Error::Truncated);
 		}
-	}
-
-	pub(crate) fn read_head<R: Read + Seek>(reader: &mut R) -> Result<Option<Self>, Error> {
-		let start = reader.stream_position()?;
-		let mut head = vec![0; HEADER_PROBE];
-		let got = read_up_to(reader, &mut head)?;
-		if got == 0 {
-			return Ok(None);
-		}
-		head.truncate(got);
-		loop {
-			match Self::parse(&head) {
-				Ok((header, consumed)) => {
-					reader.seek(SeekFrom::Start(start + consumed as u64))?;
-					return Ok(Some(header));
-				}
-				Err(Error::Truncated) => {
-					let before = head.len();
-					head.resize(before + HEADER_PROBE, 0);
-					let got = read_up_to(reader, head.get_mut(before..).ok_or(Error::Truncated)?)?;
-					if got == 0 {
-						return Err(Error::Truncated);
-					}
-					head.truncate(before + got);
-				}
-				Err(error) => return Err(error),
-			}
-		}
-	}
-
-	fn parse(bytes: &[u8]) -> Result<(Self, usize), Error> {
-		let mut cursor = Cursor::new(bytes);
-		let length = check_len(u64::from(cursor.u32_le()?))?;
-		let reference = cursor.itf8()?;
-		let start = cursor.itf8()?;
-		cursor.itf8()?;
-		let records = u32::try_from(cursor.itf8()?).map_err(|_| Error::Malformed("container"))?;
-		cursor.ltf8()?;
-		let _bases = cursor.ltf8()?;
-		let _blocks = cursor.itf8()?;
-		let landmark_count = usize::try_from(cursor.itf8()?)
+		let length = check_len(u64::from(Cursor::new(&raw).u32_le()?))?;
+		let reference = take_itf8(reader, &mut raw)?;
+		let start = take_itf8(reader, &mut raw)?;
+		take_itf8(reader, &mut raw)?;
+		let records = u32::try_from(take_itf8(reader, &mut raw)?)
+			.map_err(|_| Error::Malformed("container"))?;
+		take_ltf8(reader, &mut raw)?;
+		take_ltf8(reader, &mut raw)?;
+		take_itf8(reader, &mut raw)?;
+		let landmark_count = usize::try_from(take_itf8(reader, &mut raw)?)
 			.ok()
 			.filter(|count| *count <= MAX_LANDMARKS)
 			.ok_or(Error::Malformed("container"))?;
 		let mut landmarks = Vec::with_capacity(landmark_count.min(1024));
 		for _ in 0..landmark_count {
-			landmarks
-				.push(u32::try_from(cursor.itf8()?).map_err(|_| Error::Malformed("container"))?);
+			landmarks.push(
+				u32::try_from(take_itf8(reader, &mut raw)?)
+					.map_err(|_| Error::Malformed("container"))?,
+			);
 		}
-		let covered = cursor.position();
-		let checksum = cursor.u32_le()?;
+		let mut checksum = [0; 4];
+		reader.read_exact(&mut checksum)?;
 		let mut crc = Crc::new();
-		crc.update(bytes.get(..covered).ok_or(Error::Truncated)?);
-		if crc.sum() != checksum {
+		crc.update(&raw);
+		if crc.sum() != u32::from_le_bytes(checksum) {
 			return Err(Error::ChecksumMismatch("container header"));
 		}
-		Ok((
-			Self {
-				reference,
-				start,
-				records,
-				landmarks,
-				length,
-				size: cursor.position(),
-			},
-			cursor.position(),
-		))
+		Ok(Some(Self {
+			reference,
+			start,
+			records,
+			landmarks,
+			length,
+			size: raw.len() + checksum.len(),
+		}))
 	}
+}
+
+fn take_itf8(reader: &mut impl Read, raw: &mut Vec<u8>) -> Result<i32, Error> {
+	let from = raw.len();
+	let first = take_byte(reader, raw)?;
+	take_bytes(reader, raw, first.leading_ones().min(4) as usize)?;
+	Cursor::new(raw.get(from..).unwrap_or_default()).itf8()
+}
+
+fn take_ltf8(reader: &mut impl Read, raw: &mut Vec<u8>) -> Result<i64, Error> {
+	let from = raw.len();
+	let first = take_byte(reader, raw)?;
+	take_bytes(reader, raw, first.leading_ones() as usize)?;
+	Cursor::new(raw.get(from..).unwrap_or_default()).ltf8()
+}
+
+fn take_byte(reader: &mut impl Read, raw: &mut Vec<u8>) -> Result<u8, Error> {
+	let mut byte = [0];
+	reader.read_exact(&mut byte)?;
+	raw.extend_from_slice(&byte);
+	let [value] = byte;
+	Ok(value)
+}
+
+fn take_bytes(reader: &mut impl Read, raw: &mut Vec<u8>, count: usize) -> Result<(), Error> {
+	let from = raw.len();
+	raw.resize(from + count, 0);
+	reader.read_exact(raw.get_mut(from..).ok_or(Error::Truncated)?)?;
+	Ok(())
 }
 
 fn read_up_to(reader: &mut impl Read, buffer: &mut [u8]) -> Result<usize, Error> {

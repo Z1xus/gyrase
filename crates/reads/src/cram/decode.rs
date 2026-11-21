@@ -17,7 +17,9 @@ use crate::cram::slice::{SliceBlocks, SliceHeader};
 use crate::{Header, Line};
 
 const MAX_NAME_LEN: usize = 254;
-const MAX_BASES: usize = 1 << 30;
+const MAX_BASES: usize = 1 << 28;
+const FIRST_RESERVE: usize = 1 << 16;
+const WINDOW_CHUNK: usize = 1 << 16;
 const MAX_RECORDS: usize = 1 << 24;
 const MISSING_QUALITY: u8 = 255;
 const FILLED_QUALITY: u8 = 30;
@@ -219,8 +221,9 @@ fn decode_records(
 		array: Vec::new(),
 		reference_bases: Vec::new(),
 		md: Vec::new(),
+		length_budget: 0,
 	};
-	decoder.out.recs.reserve(records);
+	decoder.out.recs.reserve(records.min(FIRST_RESERVE));
 	for _ in 0..records {
 		decoder.record()?;
 	}
@@ -241,6 +244,7 @@ struct Decoder<'a> {
 	array: Vec<u8>,
 	reference_bases: Vec<u8>,
 	md: Vec<u8>,
+	length_budget: usize,
 }
 
 impl Decoder<'_> {
@@ -267,9 +271,10 @@ impl Decoder<'_> {
 		self.select_window(rec.reference)?;
 		if let Some(length) = optional(&series.read_length, &mut self.data)? {
 			rec.length = natural(length)?;
-			if rec.length > MAX_BASES {
+			self.length_budget = self.length_budget.saturating_add(rec.length);
+			if self.length_budget > MAX_BASES {
 				return Err(Error::TooLarge {
-					len: rec.length as u64,
+					len: self.length_budget as u64,
 				});
 			}
 		}
@@ -280,6 +285,10 @@ impl Decoder<'_> {
 		}
 		self.mate(&mut rec, index)?;
 		let flags = self.tags(&mut rec)?;
+		let side = self.out.names.len().max(self.out.tags.len());
+		if side > MAX_BASES {
+			return Err(Error::TooLarge { len: side as u64 });
+		}
 		if rec.flags & FLAG_UNMAPPED == 0 {
 			self.mapped(&mut rec, flags)?;
 		} else {
@@ -305,12 +314,31 @@ impl Decoder<'_> {
 		if reference < 0 || self.header.bases == Bases::Explicit {
 			return Ok(());
 		}
-		let index = usize::try_from(reference)
+		usize::try_from(reference)
 			.ok()
 			.filter(|index| *index < self.environment.references.count())
 			.ok_or(Error::Malformed("reference id"))?;
-		let length = self.environment.references.length(index).unwrap_or(0);
-		self.window = Some(self.environment.references.window(index, 0, length)?);
+		Ok(())
+	}
+
+	fn cover(&mut self, position: u64, count: usize) -> Result<(), Error> {
+		if self.slice.reference != -2
+			|| self.window_reference < 0
+			|| self.header.bases == Bases::Explicit
+		{
+			return Ok(());
+		}
+		let end = advance(position, count.max(1))?;
+		if self
+			.window
+			.as_ref()
+			.is_some_and(|window| window.covers(position, end))
+		{
+			return Ok(());
+		}
+		let index = natural(self.window_reference)?;
+		let to = end.max(advance(position, WINDOW_CHUNK)?);
+		self.window = Some(self.environment.references.window(index, position, to)?);
 		Ok(())
 	}
 
@@ -440,7 +468,7 @@ impl Decoder<'_> {
 		let series = &self.header.series;
 		rec.end = rec.position;
 		self.bases.clear();
-		if rec.length > 0 && !series.base.is_null() {
+		if rec.length > 0 && rec.cram_flags & CF_NO_SEQUENCE == 0 && !series.base.is_null() {
 			series
 				.base
 				.bytes(rec.length, &mut self.data, &mut self.bases)?;
@@ -496,6 +524,9 @@ impl Decoder<'_> {
 				}
 			}
 			let index = position - 1;
+			if matches!(code, b'S' | b'X' | b'I' | b'i' | b'b' | b'B') && index < walk.read {
+				return Err(malformed());
+			}
 			let gap = index.saturating_sub(walk.read);
 			self.matches(&mut walk, gap)?;
 			self.feature(code, index, preserved, &mut walk)?;
@@ -530,6 +561,7 @@ impl Decoder<'_> {
 			return Ok(());
 		}
 		let end = walk.read.checked_add(count).ok_or(Error::IntegerOverflow)?;
+		self.cover(walk.reference, count)?;
 		let target = self.bases.get_mut(walk.read..end).ok_or_else(malformed)?;
 		if let Some(window) = &self.window {
 			window.copy(walk.reference, target)?;
@@ -588,6 +620,7 @@ impl Decoder<'_> {
 			b'X' => {
 				let substitution = u8::try_from(series.substitution.int(&mut self.data)?)
 					.map_err(|_| malformed())?;
+				self.cover(walk.reference, 1)?;
 				let reference = match &self.window {
 					Some(window) => window.at(walk.reference)?,
 					None => b'N',
@@ -695,13 +728,16 @@ impl Decoder<'_> {
 	}
 
 	fn regenerate(&mut self, rec: &mut Rec, flags: TagFlags) -> Result<(), Error> {
-		let Some(window) = &self.window else {
-			return Ok(());
-		};
 		if rec.reference < 0 || rec.cigar.is_empty() {
 			return Ok(());
 		}
 		let start = u64::try_from(rec.position - 1).map_err(|_| malformed())?;
+		let span = usize::try_from(reference_span(rec.cigar.of(&self.out.cigars)))
+			.map_err(|_| Error::IntegerOverflow)?;
+		self.cover(start, span)?;
+		let Some(window) = &self.window else {
+			return Ok(());
+		};
 		let distance = regenerate::describe(
 			window,
 			start,
@@ -783,6 +819,7 @@ fn finish_value(kind: u8, tags: &mut Vec<u8>, start: usize) -> Result<(), Error>
 		b'A' | b'c' | b'C' => 1,
 		b's' | b'S' => 2,
 		b'i' | b'I' | b'f' => 4,
+		b'd' => 8,
 		b'B' => return validate_array(value),
 		_ => return Err(malformed()),
 	};

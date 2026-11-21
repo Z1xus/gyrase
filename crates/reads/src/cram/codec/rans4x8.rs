@@ -1,7 +1,7 @@
 use super::interleave::deinterleave;
 use super::rans_table::{Order0Table, SLOT_MASK, TOTAL_BITS};
 use super::stream::Stream;
-use super::{boxed_array, check_len};
+use super::{boxed_array, check_expansion, check_len};
 use crate::cram::cursor::Cursor;
 use crate::cram::{Codec, Error};
 
@@ -21,6 +21,7 @@ pub(crate) fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 	if usize::try_from(compressed_len) != Ok(cursor.remaining()) {
 		return Err(Error::Corrupt(CODEC));
 	}
+	check_expansion(raw_len, cursor.remaining())?;
 	let mut output = vec![0u8; raw_len];
 	match order {
 		ORDER_0 => decode_order0(&mut cursor, &mut output)?,

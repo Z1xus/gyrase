@@ -2,7 +2,12 @@ use libdeflater::{CompressionLvl, Compressor, Decompressor};
 
 use crate::cram::{Codec, Error};
 
+const MAX_EXPANSION: usize = 1032;
+
 pub(super) fn decode(input: &[u8], len: usize) -> Result<Vec<u8>, Error> {
+	if len / MAX_EXPANSION > input.len() {
+		return Err(Error::Corrupt(Codec::Gzip));
+	}
 	let mut output = vec![0; len];
 	let written = Decompressor::new()
 		.gzip_decompress(input, &mut output)

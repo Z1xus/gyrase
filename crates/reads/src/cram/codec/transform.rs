@@ -1,4 +1,4 @@
-use super::check_len;
+use super::{check_len, first_reserve};
 use crate::cram::cursor::Cursor;
 use crate::cram::{Codec, Error};
 
@@ -45,7 +45,7 @@ impl Packing {
 					return Err(Error::Corrupt(codec));
 				}
 				let mask = (1u8 << width) - 1;
-				let mut output = Vec::with_capacity(len);
+				let mut output = first_reserve(len);
 				'bytes: for byte in packed {
 					for shift in (0..8u32).step_by(*width as usize) {
 						if output.len() == len {
@@ -73,7 +73,7 @@ pub(super) fn expand_runs(
 		repeated[usize::from(*symbol)] = true;
 	}
 	let mut runs = Cursor::new(run_lengths);
-	let mut output = Vec::with_capacity(len);
+	let mut output = first_reserve(len);
 	for literal in literals {
 		let copies = if repeated[usize::from(*literal)] {
 			runs.uint7()? as usize + 1

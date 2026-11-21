@@ -289,7 +289,12 @@ fn write(records: &Records, environment: &Environment) -> Result<Decoded, Error>
 		let cigar = rec.cigar.of(&records.cigars);
 		let bytes = &mut out.bytes;
 		bytes.extend_from_slice(&rec.reference.to_le_bytes());
-		bytes.extend_from_slice(&(rec.position - 1).to_le_bytes());
+		bytes.extend_from_slice(
+			&rec.position
+				.checked_sub(1)
+				.ok_or(Error::IntegerOverflow)?
+				.to_le_bytes(),
+		);
 		bytes.push(u8::try_from(name.len() + 1).map_err(|_| malformed())?);
 		bytes.push(rec.mapq);
 		let bin = region_bin(i64::from(rec.position) - 1, i64::from(rec.end));
@@ -300,7 +305,12 @@ fn write(records: &Records, environment: &Environment) -> Result<Decoded, Error>
 		let length = u32::try_from(rec.length).map_err(|_| Error::IntegerOverflow)?;
 		bytes.extend_from_slice(&length.to_le_bytes());
 		bytes.extend_from_slice(&rec.mate_reference.to_le_bytes());
-		bytes.extend_from_slice(&(rec.mate_position - 1).to_le_bytes());
+		bytes.extend_from_slice(
+			&rec.mate_position
+				.checked_sub(1)
+				.ok_or(Error::IntegerOverflow)?
+				.to_le_bytes(),
+		);
 		bytes.extend_from_slice(&rec.template_length.unwrap_or(0).to_le_bytes());
 		bytes.extend_from_slice(name);
 		bytes.push(0);

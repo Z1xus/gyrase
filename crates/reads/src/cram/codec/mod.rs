@@ -17,12 +17,26 @@ mod transform;
 use crate::cram::Error;
 
 pub(crate) const MAX_RAW_LEN: usize = 1 << 30;
+const MAX_EXPANSION: usize = 1 << 19;
+const EXPANSION_SLACK: usize = 64;
+const FIRST_RESERVE: usize = 1 << 20;
 
 pub(crate) fn check_len(len: u64) -> Result<usize, Error> {
 	usize::try_from(len)
 		.ok()
 		.filter(|len| *len <= MAX_RAW_LEN)
 		.ok_or(Error::TooLarge { len })
+}
+
+fn check_expansion(len: usize, coded: usize) -> Result<(), Error> {
+	if len / MAX_EXPANSION > coded.saturating_add(EXPANSION_SLACK) {
+		return Err(Error::TooLarge { len: len as u64 });
+	}
+	Ok(())
+}
+
+fn first_reserve(len: usize) -> Vec<u8> {
+	Vec::with_capacity(len.min(FIRST_RESERVE))
 }
 
 fn boxed_array<T: Clone, const N: usize>(value: T) -> Result<Box<[T; N]>, Error> {

@@ -68,7 +68,7 @@ impl CraiEntry {
 				let begin = self.start.saturating_sub(1);
 				contig == interval.contig
 					&& begin < interval.end
-					&& begin.saturating_add(self.span) > interval.start
+					&& begin.saturating_add(self.span.max(1)) > interval.start
 			}
 		}
 	}
@@ -98,6 +98,7 @@ impl Crai {
 		let bytes = read_all(gyrase_io::decode(Box::new(input), workers)?)?;
 		let mut entries = Vec::new();
 		for (number, line) in bytes.split(|&byte| byte == b'\n').enumerate() {
+			let line = line.strip_suffix(b"\r").unwrap_or(line);
 			if line.is_empty() {
 				continue;
 			}

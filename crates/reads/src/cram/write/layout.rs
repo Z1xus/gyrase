@@ -1,5 +1,6 @@
 use libdeflater::Crc;
 
+use crate::cram::Error;
 use crate::cram::codec::{self, Method};
 
 pub(super) const EOF_START: i32 = 4_542_278;
@@ -23,6 +24,15 @@ impl BlockKind {
 			Self::CoreData => 5,
 		}
 	}
+}
+
+pub(super) fn int(value: usize) -> Result<i32, Error> {
+	i32::try_from(value).map_err(|_| Error::IntegerOverflow)
+}
+
+pub(super) fn put_length(out: &mut Vec<u8>, value: usize) -> Result<(), Error> {
+	put_itf8(out, int(value)?);
+	Ok(())
 }
 
 pub(super) fn put_itf8(out: &mut Vec<u8>, value: i32) {
@@ -76,13 +86,23 @@ pub(super) fn crc32(bytes: &[u8]) -> u32 {
 	crc.sum()
 }
 
-pub(super) fn block(out: &mut Vec<u8>, kind: BlockKind, content_id: i32, raw: &[u8]) {
+pub(super) fn block(
+	out: &mut Vec<u8>,
+	kind: BlockKind,
+	content_id: i32,
+	raw: &[u8],
+) -> Result<(), Error> {
 	let (method, data) = codec::compress(raw);
-	write_block(out, kind, content_id, method, &data, raw.len());
+	write_block(out, kind, content_id, method, &data, raw.len())
 }
 
-pub(super) fn raw_block(out: &mut Vec<u8>, kind: BlockKind, content_id: i32, raw: &[u8]) {
-	write_block(out, kind, content_id, Method::Raw, raw, raw.len());
+pub(super) fn raw_block(
+	out: &mut Vec<u8>,
+	kind: BlockKind,
+	content_id: i32,
+	raw: &[u8],
+) -> Result<(), Error> {
+	write_block(out, kind, content_id, Method::Raw, raw, raw.len())
 }
 
 fn write_block(
@@ -92,16 +112,17 @@ fn write_block(
 	method: Method,
 	data: &[u8],
 	raw_len: usize,
-) {
+) -> Result<(), Error> {
 	let started = out.len();
 	out.push(method.code());
 	out.push(kind.code());
 	put_itf8(out, content_id);
-	put_itf8(out, i32::try_from(data.len()).unwrap_or(i32::MAX));
-	put_itf8(out, i32::try_from(raw_len).unwrap_or(i32::MAX));
+	put_length(out, data.len())?;
+	put_length(out, raw_len)?;
 	out.extend_from_slice(data);
 	let sum = out.get(started..).map(crc32).unwrap_or_default();
 	out.extend_from_slice(&sum.to_le_bytes());
+	Ok(())
 }
 
 #[derive(Debug)]
@@ -116,24 +137,31 @@ pub(super) struct ContainerFields {
 	pub(super) landmarks: Vec<u32>,
 }
 
-pub(super) fn container_header(fields: &ContainerFields, body_len: usize) -> Vec<u8> {
+pub(super) fn container_header(
+	fields: &ContainerFields,
+	body_len: usize,
+) -> Result<Vec<u8>, Error> {
 	let mut out = Vec::new();
-	out.extend_from_slice(&u32::try_from(body_len).unwrap_or(u32::MAX).to_le_bytes());
+	let body_len = u32::try_from(body_len).map_err(|_| Error::IntegerOverflow)?;
+	out.extend_from_slice(&body_len.to_le_bytes());
 	put_itf8(&mut out, fields.reference);
 	put_itf8(&mut out, fields.start);
 	put_itf8(&mut out, fields.span);
-	put_itf8(&mut out, i32::try_from(fields.records).unwrap_or(i32::MAX));
+	put_itf8(
+		&mut out,
+		i32::try_from(fields.records).map_err(|_| Error::IntegerOverflow)?,
+	);
 	put_ltf8(&mut out, fields.counter);
 	put_ltf8(&mut out, fields.bases);
 	put_itf8(&mut out, fields.blocks);
-	put_itf8(
-		&mut out,
-		i32::try_from(fields.landmarks.len()).unwrap_or(i32::MAX),
-	);
+	put_length(&mut out, fields.landmarks.len())?;
 	for landmark in &fields.landmarks {
-		put_itf8(&mut out, i32::try_from(*landmark).unwrap_or(i32::MAX));
+		put_itf8(
+			&mut out,
+			i32::try_from(*landmark).map_err(|_| Error::IntegerOverflow)?,
+		);
 	}
 	let sum = crc32(&out);
 	out.extend_from_slice(&sum.to_le_bytes());
-	out
+	Ok(out)
 }

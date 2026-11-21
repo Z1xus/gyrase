@@ -4,6 +4,8 @@ use crate::cram::Error;
 use crate::cram::decode::advance;
 use crate::cram::reference::Window;
 
+const CHUNK: usize = 1 << 16;
+
 fn malformed() -> Error {
 	Error::Malformed("record")
 }
@@ -25,14 +27,16 @@ pub(crate) fn describe(
 		let length = (op >> 4) as usize;
 		match op & 0xf {
 			0 | 7 | 8 => {
-				reference_bases.resize(length, 0);
-				window.copy(reference, reference_bases)?;
-				let aligned = bases.get(read..read + length).ok_or_else(malformed)?;
-				if aligned == reference_bases.as_slice() && !reference_bases.contains(&b'N') {
-					run = run.saturating_add(u32::try_from(length).unwrap_or(u32::MAX));
-				} else {
+				let mut done = 0;
+				while done < length {
+					let step = (length - done).min(CHUNK);
+					reference_bases.resize(step, 0);
+					window.copy(reference, reference_bases)?;
+					let aligned = bases.get(read..read + step).ok_or_else(malformed)?;
 					for (base, expected) in aligned.iter().zip(reference_bases.iter()) {
-						if base.eq_ignore_ascii_case(expected) && *expected != b'N' {
+						if *base == b'='
+							|| (base.eq_ignore_ascii_case(expected) && *expected != b'N')
+						{
 							run += 1;
 						} else {
 							write!(md, "{run}")?;
@@ -41,22 +45,28 @@ pub(crate) fn describe(
 							distance += 1;
 						}
 					}
+					read += step;
+					reference = advance(reference, step)?;
+					done += step;
 				}
-				read += length;
-				reference = advance(reference, length)?;
 			}
 			1 => {
 				read += length;
 				distance = distance.saturating_add(op >> 4);
 			}
 			2 => {
-				reference_bases.resize(length, 0);
-				window.copy(reference, reference_bases)?;
 				write!(md, "{run}^")?;
-				md.extend_from_slice(reference_bases);
+				let mut done = 0;
+				while done < length {
+					let step = (length - done).min(CHUNK);
+					reference_bases.resize(step, 0);
+					window.copy(reference, reference_bases)?;
+					md.extend_from_slice(reference_bases);
+					reference = advance(reference, step)?;
+					done += step;
+				}
 				run = 0;
 				distance = distance.saturating_add(op >> 4);
-				reference = advance(reference, length)?;
 			}
 			3 => reference = advance(reference, length)?,
 			4 => read += length,

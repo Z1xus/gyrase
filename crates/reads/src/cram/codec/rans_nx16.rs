@@ -2,7 +2,7 @@ use super::interleave::deinterleave;
 use super::rans_table::{Order0Table, SLOTS, TOTAL_BITS};
 use super::stream::Stream;
 use super::transform::{Packing, decode_stripe, expand_runs};
-use super::{boxed_array, check_len};
+use super::{boxed_array, check_expansion, check_len};
 use crate::cram::cursor::Cursor;
 use crate::cram::{Codec, Error};
 
@@ -36,6 +36,9 @@ fn decode_with_size(input: &[u8], known_len: Option<usize>) -> Result<Vec<u8>, E
 	let mut cursor = Cursor::new(input);
 	let flags = Flags(cursor.u8()?);
 	if flags.has(Flags::STRIPE) {
+		if known_len.is_some() {
+			return Err(Error::Corrupt(CODEC));
+		}
 		return decode_stripe(&mut cursor, CODEC, decode_with_size);
 	}
 	let len = if flags.has(Flags::NO_SIZE) {
@@ -224,6 +227,7 @@ fn renormalise(state: u32, stream: &mut Stream<'_>) -> u32 {
 }
 
 pub(super) fn decode_order0<const N: usize>(payload: &[u8], len: usize) -> Result<Vec<u8>, Error> {
+	check_expansion(len, payload.len())?;
 	let mut cursor = Cursor::new(payload);
 	let table = read_order0_table(&mut cursor)?;
 	let mut states = read_states::<N>(&mut cursor)?;
@@ -343,6 +347,7 @@ impl Order1Table {
 }
 
 pub(super) fn decode_order1<const N: usize>(payload: &[u8], len: usize) -> Result<Vec<u8>, Error> {
+	check_expansion(len, payload.len())?;
 	let mut cursor = Cursor::new(payload);
 	let table = Order1Table::read(&mut cursor)?;
 	let mut states = read_states::<N>(&mut cursor)?;

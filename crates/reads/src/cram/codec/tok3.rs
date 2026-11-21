@@ -1,4 +1,6 @@
-use super::{arith, check_len, rans_nx16};
+use std::rc::Rc;
+
+use super::{arith, check_len, first_reserve, rans_nx16};
 use crate::cram::cursor::Cursor;
 use crate::cram::{Codec, Error};
 
@@ -56,20 +58,27 @@ impl Kind {
 
 #[derive(Debug, Default, Clone)]
 struct Stream {
-	data: Option<Vec<u8>>,
+	data: Option<Rc<Vec<u8>>>,
+	implicit: usize,
 	position: usize,
 }
 
 impl Stream {
 	fn present(data: Vec<u8>) -> Self {
 		Self {
-			data: Some(data),
+			data: Some(Rc::new(data)),
+			implicit: 0,
 			position: 0,
 		}
 	}
 
 	fn next_byte(&mut self) -> Option<u8> {
-		let byte = *self.data.as_ref()?.get(self.position)?;
+		let data = self.data.as_ref()?;
+		let byte = match data.get(self.position) {
+			Some(byte) => *byte,
+			None if self.position < data.len() + self.implicit => Kind::Match as u8,
+			None => return None,
+		};
 		self.position += 1;
 		Some(byte)
 	}
@@ -133,34 +142,33 @@ fn read_streams(input: &[u8], name_count: usize, use_arith: bool) -> Result<Stre
 				*stream = Stream::default();
 			}
 			if flags & KIND_MASK != 0 {
-				let mut types = vec![Kind::Match as u8; name_count];
-				if let Some(first_type) = types.first_mut() {
-					*first_type = flags & KIND_MASK;
-				}
-				*streams.streams.get_mut(first).ok_or_else(corrupt)? = Stream::present(types);
+				*streams.streams.get_mut(first).ok_or_else(corrupt)? = Stream {
+					implicit: name_count - 1,
+					..Stream::present(vec![flags & KIND_MASK])
+				};
 			}
 		}
 		let column = column.ok_or_else(corrupt)?;
 		let index = column * KINDS_PER_TOKEN + usize::from(flags & KIND_MASK);
-		let data = if let Some(source) = copy_from {
+		let stream = if let Some(source) = copy_from {
 			if source >= index {
 				return Err(corrupt());
 			}
-			streams
-				.streams
-				.get(source)
-				.and_then(|stream| stream.data.clone())
-				.ok_or_else(corrupt)?
+			let source = streams.streams.get(source).ok_or_else(corrupt)?;
+			Stream {
+				position: 0,
+				..source.clone()
+			}
 		} else {
 			let compressed_len = check_len(cursor.uint7()?.into())?;
 			let compressed = cursor.take(compressed_len)?;
-			if use_arith {
+			Stream::present(if use_arith {
 				arith::decode(compressed)?
 			} else {
 				rans_nx16::decode(compressed)?
-			}
+			})
 		};
-		*streams.streams.get_mut(index).ok_or_else(corrupt)? = Stream::present(data);
+		*streams.streams.get_mut(index).ok_or_else(corrupt)? = stream;
 	}
 	Ok(streams)
 }
@@ -201,14 +209,14 @@ pub(crate) fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 	let declared_len = check_len(cursor.u32_le()?.into())?;
 	let name_count = cursor.u32_le()?;
 	let use_arith = cursor.u8()? != 0;
-	if name_count == 0 || name_count > MAX_NAMES {
+	if name_count == 0 || name_count > MAX_NAMES || name_count as usize > declared_len {
 		return Err(corrupt());
 	}
 	let mut streams = read_streams(cursor.rest(), name_count as usize, use_arith)?;
 	let mut decoder = NameDecoder {
 		limit: declared_len + OUTPUT_SLACK,
 		name_count: name_count as usize,
-		output: Vec::with_capacity(declared_len + OUTPUT_SLACK),
+		output: first_reserve(declared_len + OUTPUT_SLACK),
 		names: Vec::new(),
 		tokens: Vec::new(),
 		current: Vec::new(),
@@ -464,7 +472,9 @@ impl NameDecoder {
 	}
 
 	fn push_fixed(&mut self, value: u32, width: usize) -> Result<(), Error> {
-		if width > MAX_FIXED_DIGITS {
+		if width > MAX_FIXED_DIGITS
+			|| u64::from(value) >= 10u64.pow(u32::try_from(width).map_err(|_| corrupt())?)
+		{
 			return Err(corrupt());
 		}
 		self.reserve(width + 20)?;

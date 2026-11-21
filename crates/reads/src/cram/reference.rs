@@ -113,6 +113,11 @@ impl Window {
 		}
 	}
 
+	pub(crate) fn covers(&self, position: u64, end: u64) -> bool {
+		let loaded = self.start.saturating_add(self.bases.len() as u64);
+		position >= self.start && end.min(self.contig_length) <= loaded
+	}
+
 	pub(crate) fn at(&self, position: u64) -> Result<u8, Error> {
 		if position >= self.contig_length {
 			return Ok(b'N');

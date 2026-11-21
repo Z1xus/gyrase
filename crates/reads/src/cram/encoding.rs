@@ -2,6 +2,8 @@ use crate::cram::Error;
 use crate::cram::cursor::Cursor;
 
 const MAX_ARRAY_LEN: usize = 1 << 28;
+const FIRST_RESERVE: usize = 1 << 16;
+const MAX_NESTING: u32 = 1;
 const MAX_CODE_BITS: u32 = 31;
 const TABLE_LEN: usize = 32;
 const MAX_SYMBOLS: usize = 1 << 20;
@@ -297,6 +299,10 @@ pub(crate) enum Encoding {
 
 impl Encoding {
 	pub(crate) fn read(cursor: &mut Cursor<'_>, slots: &mut Slots) -> Result<Self, Error> {
+		Self::read_nested(cursor, slots, 0)
+	}
+
+	fn read_nested(cursor: &mut Cursor<'_>, slots: &mut Slots, depth: u32) -> Result<Self, Error> {
 		let codec = cursor.itf8()?;
 		let size = usize::try_from(cursor.itf8()?).map_err(|_| malformed())?;
 		let mut params = Cursor::new(cursor.take(size)?);
@@ -306,9 +312,9 @@ impl Encoding {
 				slot: slots.intern(params.itf8()?),
 			},
 			3 => Self::Huffman(Huffman::read(&mut params)?),
-			4 => Self::ByteArrayLen {
-				length: Box::new(Self::read(&mut params, slots)?),
-				values: Box::new(Self::read(&mut params, slots)?),
+			4 if depth < MAX_NESTING => Self::ByteArrayLen {
+				length: Box::new(Self::read_nested(&mut params, slots, depth + 1)?),
+				values: Box::new(Self::read_nested(&mut params, slots, depth + 1)?),
 			},
 			5 => Self::ByteArrayStop {
 				stop: params.u8()?,
@@ -401,7 +407,7 @@ impl Encoding {
 		if let Self::External { slot } = self {
 			out.extend_from_slice(data.external(*slot)?.take(count)?);
 		} else {
-			out.reserve(count);
+			out.reserve(count.min(FIRST_RESERVE));
 			for _ in 0..count {
 				out.push(self.byte(data)?);
 			}

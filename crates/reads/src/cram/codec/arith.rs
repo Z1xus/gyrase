@@ -1,8 +1,8 @@
 use super::bzip2;
-use super::check_len;
 use super::model::Model;
 use super::range_coder::RangeDecoder;
 use super::transform::{Packing, decode_stripe};
+use super::{check_expansion, check_len, first_reserve};
 use crate::cram::cursor::Cursor;
 use crate::cram::{Codec, Error};
 
@@ -36,6 +36,9 @@ fn decode_with_size(input: &[u8], known_len: Option<usize>) -> Result<Vec<u8>, E
 	let mut cursor = Cursor::new(input);
 	let flags = Flags(cursor.u8()?);
 	if flags.has(Flags::STRIPE) {
+		if known_len.is_some() {
+			return Err(Error::Corrupt(CODEC));
+		}
 		return decode_stripe(&mut cursor, CODEC, decode_with_size);
 	}
 	let len = if flags.has(Flags::NO_SIZE) {
@@ -76,6 +79,7 @@ fn decode_with_size(input: &[u8], known_len: Option<usize>) -> Result<Vec<u8>, E
 
 fn decode_modelled(flags: Flags, payload: &[u8], len: usize) -> Result<Vec<u8>, Error> {
 	let (symbol_count, coded) = payload.split_first().ok_or(Error::Truncated)?;
+	check_expansion(len, coded.len())?;
 	let symbol_count = match symbol_count {
 		0 => 256,
 		count => usize::from(*count),
@@ -104,7 +108,7 @@ fn decode_order0(
 	len: usize,
 ) -> Result<Vec<u8>, Error> {
 	let mut model = Model::new(symbol_count);
-	let mut output = Vec::with_capacity(len);
+	let mut output = first_reserve(len);
 	for _ in 0..len {
 		output.push(decode_byte(&mut model, decoder)?);
 	}
@@ -117,7 +121,7 @@ fn decode_order1(
 	len: usize,
 ) -> Result<Vec<u8>, Error> {
 	let mut models = vec![Model::new(symbol_count); 256];
-	let mut output = Vec::with_capacity(len);
+	let mut output = first_reserve(len);
 	let mut previous = 0u8;
 	for _ in 0..len {
 		let model = models
@@ -137,7 +141,7 @@ fn decode_runs(
 ) -> Result<Vec<u8>, Error> {
 	let mut literal_models = vec![Model::new(symbol_count); if order1 { 256 } else { 1 }];
 	let mut run_models = vec![Model::new(MAX_RUN); RUN_CONTEXTS];
-	let mut output = Vec::with_capacity(len);
+	let mut output = first_reserve(len);
 	let mut previous = 0u8;
 	while output.len() < len {
 		let literal_context = if order1 { usize::from(previous) } else { 0 };

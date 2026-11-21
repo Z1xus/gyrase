@@ -1,7 +1,7 @@
 use gyrase_genome::ContigId;
 
 use super::header::compression_header;
-use super::layout::{BlockKind, ContainerFields, block, put_itf8, put_ltf8, raw_block};
+use super::layout::{BlockKind, ContainerFields, block, int, put_itf8, put_ltf8, raw_block};
 use super::record::RecordEncoder;
 use crate::RecordRef;
 use crate::cram::Error;
@@ -109,26 +109,23 @@ pub(super) fn encode(
 		encoder.encode(record?)?;
 	}
 	let dictionary = encoder.dictionary;
-	let header = compression_header(&dictionary.lines, &dictionary.keys);
+	let header = compression_header(&dictionary.lines, &dictionary.keys)?;
 	let mut body = Vec::new();
-	block(&mut body, BlockKind::CompressionHeader, 0, &header);
+	block(&mut body, BlockKind::CompressionHeader, 0, &header)?;
 	let slice_offset = body.len();
 	let mut externals = Vec::new();
 	let mut content_ids = Vec::new();
 	for (id, bytes) in encoder.streams.into_blocks() {
 		content_ids.push(id);
-		block(&mut externals, BlockKind::ExternalData, id, &bytes);
+		block(&mut externals, BlockKind::ExternalData, id, &bytes)?;
 	}
 	let mut slice = Vec::new();
 	put_itf8(&mut slice, reference);
 	put_itf8(&mut slice, extent.start);
 	put_itf8(&mut slice, extent.span);
-	put_itf8(
-		&mut slice,
-		i32::try_from(batch.len()).map_err(|_| Error::IntegerOverflow)?,
-	);
+	put_itf8(&mut slice, int(batch.len())?);
 	put_ltf8(&mut slice, counter);
-	let block_count = i32::try_from(content_ids.len() + 1).map_err(|_| Error::IntegerOverflow)?;
+	let block_count = int(content_ids.len() + 1)?;
 	put_itf8(&mut slice, block_count);
 	put_itf8(&mut slice, block_count - 1);
 	for id in &content_ids {
@@ -136,8 +133,8 @@ pub(super) fn encode(
 	}
 	put_itf8(&mut slice, NO_EMBEDDED_REFERENCE);
 	slice.extend_from_slice(&checksum);
-	raw_block(&mut body, BlockKind::SliceHeader, 0, &slice);
-	raw_block(&mut body, BlockKind::CoreData, 0, &[]);
+	raw_block(&mut body, BlockKind::SliceHeader, 0, &slice)?;
+	raw_block(&mut body, BlockKind::CoreData, 0, &[])?;
 	body.extend_from_slice(&externals);
 	Ok(Encoded {
 		fields: ContainerFields {
