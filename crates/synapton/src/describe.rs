@@ -14,6 +14,7 @@ pub(crate) fn describe(
 	alignment: &Alignment<'_>,
 	cigar: &mut Vec<CigarOp>,
 	md: &mut Vec<u8>,
+	with_md: bool,
 ) -> u32 {
 	cigar.clear();
 	md.clear();
@@ -41,9 +42,11 @@ pub(crate) fn describe(
 					if query == reference && reference < 4 {
 						run += 1;
 					} else {
-						push_number(md, run);
+						if with_md {
+							push_number(md, run);
+							md.push(ascii(reference));
+						}
 						run = 0;
-						md.push(ascii(reference));
 						edits += 1;
 					}
 				}
@@ -55,24 +58,28 @@ pub(crate) fn describe(
 				q += length;
 			}
 			CigarKind::Deletion => {
-				push_number(md, run);
+				if with_md {
+					push_number(md, run);
+					md.push(b'^');
+					md.extend(
+						alignment
+							.reference
+							.iter()
+							.skip(r)
+							.take(length)
+							.map(|&code| ascii(code)),
+					);
+				}
 				run = 0;
-				md.push(b'^');
-				md.extend(
-					alignment
-						.reference
-						.iter()
-						.skip(r)
-						.take(length)
-						.map(|&code| ascii(code)),
-				);
 				edits += u32_of(length);
 				r += length;
 			}
 			CigarKind::SoftClip => q += length,
 		}
 	}
-	push_number(md, run);
+	if with_md {
+		push_number(md, run);
+	}
 	edits
 }
 

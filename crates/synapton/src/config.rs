@@ -96,6 +96,7 @@ pub struct AlignConfig {
 	pub relaxed_seed_hits: usize,
 	pub calibration_pairs: usize,
 	pub chunk_reads: usize,
+	pub md: bool,
 }
 
 impl Default for AlignConfig {
@@ -109,6 +110,7 @@ impl Default for AlignConfig {
 			relaxed_seed_hits: 1000,
 			calibration_pairs: 8192,
 			chunk_reads: 512,
+			md: false,
 		}
 	}
 }

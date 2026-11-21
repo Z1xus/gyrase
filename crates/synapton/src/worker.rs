@@ -708,6 +708,7 @@ impl<'a> Worker<'a> {
 			},
 			&mut self.cigar,
 			&mut self.md,
+			self.config.md,
 		);
 		let flags = match candidate.strand {
 			Strand::Reverse => flags.with(Flag::Reverse),

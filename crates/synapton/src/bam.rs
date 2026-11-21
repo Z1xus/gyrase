@@ -215,8 +215,10 @@ impl<'a> BamEmitter<'a> {
 	) -> Result<(), RecordError> {
 		self.record
 			.push_integer(*b"NM", i64::from(alignment.edit_distance))?;
-		self.record
-			.push_tag(*b"MD", Value::String(batch.md(alignment)))?;
+		let md = batch.md(alignment);
+		if !md.is_empty() {
+			self.record.push_tag(*b"MD", Value::String(md))?;
+		}
 		self.record
 			.push_integer(*b"AS", i64::from(alignment.score))?;
 		if let Some(suboptimal) = alignment.suboptimal_score {
