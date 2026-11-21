@@ -113,7 +113,7 @@ Benchmark conditions: 2,500,000 paired-end reads (5,000,000 reads, 151 bp) from 
 | minimap2 2.31 | 53.78 s | 92,971 reads/s | 962 MiB | 99.499% |
 | bwa-mem2 2.2.1 | 85.67 s | 58,363 reads/s | 3,788 MiB | 99.995% |
 
-These numbers are for chromosome 20 only. On this chromosome 20 test, `synapton` is faster and uses less memory than `strobealign`, `minimap2` and `bwa-mem2`. `bwa-mem2` has higher placement agreement with the original bwa-mem BAM (99.995% vs 99.950% in GIAB high-confidence regions), and all three baseline tools have fewer discordant high-MAPQ reads outside GIAB high-confidence regions (0.180% for `synapton` vs 0.158% for `strobealign`, 0.077% for `minimap2` and 0.023% for `bwa-mem2`).
+These numbers are for chromosome 20 only. On this chromosome 20 test, `synapton` is faster and uses less memory than `strobealign`, `minimap2` and `bwa-mem2`. `bwa-mem2` has higher placement agreement with the original bwa-mem BAM (99.995% vs 99.950% in GIAB high-confidence regions), and all three baseline tools have fewer misplaced reads with MAPQ 20 or more, across all reads that had MAPQ 20 or more in the original BAM (0.180% for `synapton` vs 0.158% for `strobealign`, 0.077% for `minimap2` and 0.023% for `bwa-mem2`).
 
 ## Build from source
 
