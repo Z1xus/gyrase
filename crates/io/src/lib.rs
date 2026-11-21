@@ -1,6 +1,7 @@
 mod bgzf;
 mod error;
 mod format;
+mod partial;
 mod workers;
 
 pub use bgzf::{
@@ -9,4 +10,5 @@ pub use bgzf::{
 };
 pub use error::Error;
 pub use format::{Compression, Decoded, decode, peek};
+pub use partial::Partial;
 pub use workers::Workers;

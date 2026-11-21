@@ -1,10 +1,9 @@
-use std::ffi::OsString;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
 use gyrase_genome::{Contig, Contigs};
-use gyrase_io::Workers;
+use gyrase_io::{Partial, Workers};
 use rayon::prelude::*;
 
 use super::Index;
@@ -323,25 +322,18 @@ pub(super) fn save(index: &Index, path: &Path, workers: &Workers) -> Result<(), 
 		buckets_checksum,
 		entries_checksum,
 	};
-	let mut partial = OsString::from(path);
-	partial.push(".part");
-	let written = (|| {
-		let mut writer = BufWriter::with_capacity(8 << 20, File::create(&partial)?);
-		writer.write_all(&header.encode())?;
-		writer.write_all(&meta)?;
-		write_u64s(&mut writer, index.reference.words())?;
-		write_u32s(&mut writer, &index.buckets)?;
-		write_u64s(&mut writer, &index.entries)?;
-		writer
-			.into_inner()
-			.map_err(io::IntoInnerError::into_error)?
-			.sync_all()
-	})();
-	if let Err(error) = written {
-		let _ = fs::remove_file(&partial);
-		return Err(error.into());
-	}
-	fs::rename(&partial, path)?;
+	let (partial, file) = Partial::create(path)?;
+	let mut writer = BufWriter::with_capacity(8 << 20, file);
+	writer.write_all(&header.encode())?;
+	writer.write_all(&meta)?;
+	write_u64s(&mut writer, index.reference.words())?;
+	write_u32s(&mut writer, &index.buckets)?;
+	write_u64s(&mut writer, &index.entries)?;
+	writer
+		.into_inner()
+		.map_err(io::IntoInnerError::into_error)?
+		.sync_all()?;
+	partial.commit()?;
 	Ok(())
 }
 

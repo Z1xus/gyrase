@@ -120,12 +120,13 @@ impl Store {
 			.sync_all()
 			.map_err(created)?;
 		let index = suffixed(partial.path(), ".fai");
-		if let Err(error) = verify(partial.path(), build) {
+		let installed = verify(partial.path(), build)
+			.and_then(|()| partial.commit())
+			.and_then(|()| fs::rename(&index, suffixed(&path, ".fai")).map_err(created));
+		if installed.is_err() {
 			let _ = fs::remove_file(&index);
-			return Err(error);
 		}
-		partial.commit()?;
-		fs::rename(index, suffixed(&path, ".fai")).map_err(created)?;
+		installed?;
 		Ok(path)
 	}
 }

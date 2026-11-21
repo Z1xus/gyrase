@@ -1,43 +1,37 @@
 use std::ffi::OsString;
-use std::fs::{self, File};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use crate::Error;
 
 #[derive(Debug)]
 pub(crate) struct Partial {
-	path: PathBuf,
+	inner: gyrase_io::Partial,
 	target: PathBuf,
 }
 
 impl Partial {
 	pub(crate) fn create(target: &Path) -> Result<(Self, File), Error> {
-		let partial = Self {
-			path: suffixed(target, &format!(".{}.part", std::process::id())),
-			target: target.to_owned(),
-		};
-		let file = File::create(&partial.path).map_err(|source| Error::Write {
+		let (inner, file) = gyrase_io::Partial::create(target).map_err(|source| Error::Write {
 			path: target.to_owned(),
 			source,
 		})?;
+		let partial = Self {
+			inner,
+			target: target.to_owned(),
+		};
 		Ok((partial, file))
 	}
 
 	pub(crate) fn path(&self) -> &Path {
-		&self.path
+		self.inner.path()
 	}
 
 	pub(crate) fn commit(self) -> Result<(), Error> {
-		fs::rename(&self.path, &self.target).map_err(|source| Error::Write {
-			path: self.target.clone(),
+		self.inner.commit().map_err(|source| Error::Write {
+			path: self.target,
 			source,
 		})
-	}
-}
-
-impl Drop for Partial {
-	fn drop(&mut self) {
-		let _ = fs::remove_file(&self.path);
 	}
 }
 

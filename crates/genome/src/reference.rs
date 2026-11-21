@@ -1,7 +1,8 @@
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use gyrase_io::Partial;
 use md5::{Digest, Md5};
 
 use crate::{Contig, Contigs, Error, Interval};
@@ -178,18 +179,8 @@ fn read_index(reader: impl BufRead) -> Result<Vec<FaiEntry>, Error> {
 }
 
 fn write_index(path: &Path, entries: &[FaiEntry]) -> Result<(), Error> {
-	let mut temporary = path.as_os_str().to_owned();
-	temporary.push(format!(".{}.tmp", std::process::id()));
-	let temporary = PathBuf::from(temporary);
-	let written = write_entries(&temporary, entries).and_then(|()| fs::rename(&temporary, path));
-	if written.is_err() {
-		let _ = fs::remove_file(&temporary);
-	}
-	Ok(written?)
-}
-
-fn write_entries(path: &Path, entries: &[FaiEntry]) -> std::io::Result<()> {
-	let mut writer = BufWriter::new(File::create(path)?);
+	let (partial, file) = Partial::create(path)?;
+	let mut writer = BufWriter::new(file);
 	for entry in entries {
 		writeln!(
 			writer,
@@ -197,7 +188,8 @@ fn write_entries(path: &Path, entries: &[FaiEntry]) -> std::io::Result<()> {
 			entry.name, entry.length, entry.offset, entry.line_bases, entry.line_width
 		)?;
 	}
-	writer.flush()
+	writer.flush()?;
+	Ok(partial.commit()?)
 }
 
 struct Scan {
