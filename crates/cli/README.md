@@ -15,6 +15,7 @@ cargo install gyrase-cli
 ```sh
 gyr sample.bam
 gyr sample_R1.fastq.gz sample_R2.fastq.gz -o out
+gyr sample_R1.fastq.gz sample_R2.fastq.gz --bam
 gyr sample.cram -f 23andme,ancestry
 gyr samtools flagstat sample.bam
 gyr bcftools view sample.vcf.gz

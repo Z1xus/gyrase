@@ -58,20 +58,21 @@ fn main() -> Result<(), synapton::Error> {
 }
 ```
 
-Use `BamEmitter` to convert an `AlignedBatch` into `gyrase-reads` BAM records with standard `NM`, `MD`, `AS`, `XS`, `SA`, `MC` and `ms` tags.
+Use `BamEmitter` to convert an `AlignedBatch` into `gyrase-reads` BAM records with standard `NM`, `AS`, `XS`, `SA`, `MC` and `ms` tags. Set `AlignConfig.md` to `true` to also emit the `MD` tag (off by default). Enable the optional `gpu` Cargo feature for `wgpu`-accelerated seeding on indexes that fit in one storage buffer binding (larger indexes fall back to CPU automatically).
 
 ## Benchmark (chr20)
 
-Conditions: 2,500,000 paired-end reads (5,000,000 reads, 151 bp) from HG002 NovaSeq PCR-free 35x on GRCh38 chromosome 20 only, prebuilt index, full SAM output to disk, 12 threads, AMD Ryzen 5 7600X (6 cores, 12 threads). Faster of two runs per tool. Agreement is the share of reads placed within 10 bp of the original HG002 bwa-mem BAM inside GIAB v4.2.1 high-confidence regions where the original MAPQ is at least 20.
+Conditions: 2,500,000 paired-end reads (5,000,000 reads, 151 bp) from HG002 NovaSeq PCR-free 35x on GRCh38 chromosome 20 only, prebuilt index, full SAM output to disk, 12 threads, AMD Ryzen 5 7600X (6 cores, 12 threads) and NVIDIA GeForce RTX 4060 (for the optional `gpu` feature build). Median of three runs per tool. Agreement is the share of reads placed within 10 bp of the original HG002 bwa-mem BAM inside GIAB v4.2.1 high-confidence regions where the original MAPQ is at least 20. Misplaced at MAPQ >= 20 is the share of reads with original MAPQ at least 20 placed more than 50 bp away or on the opposite strand with MAPQ at least 20.
 
-| Aligner | Wall time (chr20) | Speed (chr20) | Peak RSS (chr20) | Agreement in GIAB BED (chr20) |
-| --- | --- | --- | --- | --- |
-| synapton | 15.97 s | 313,087 reads/s | 315 MiB | 99.950% |
-| strobealign 0.20.0 | 17.29 s | 289,184 reads/s | 595 MiB | 99.858% |
-| minimap2 2.31 | 53.78 s | 92,971 reads/s | 962 MiB | 99.499% |
-| bwa-mem2 2.2.1 | 85.67 s | 58,363 reads/s | 3,788 MiB | 99.995% |
+| Aligner | Wall time (chr20) | Speed (chr20) | Peak RSS (chr20) | Agreement in GIAB BED (chr20) | Misplaced at MAPQ >= 20 |
+| --- | --- | --- | --- | --- | --- |
+| synapton (CPU) | 14.91 s | 335,345 reads/s | 316 MiB | 99.950% | 0.021% |
+| synapton (GPU, `gpu` feature) | 12.06 s | 414,594 reads/s | 710 MiB | 99.950% | 0.021% |
+| strobealign 0.20.0 | 15.92 s | 314,070 reads/s | 530 MiB | 99.858% | 0.158% |
+| minimap2 2.31 | 45.06 s | 110,963 reads/s | 928 MiB | 99.499% | 0.077% |
+| bwa-mem2 2.2.1 | 76.33 s | 65,505 reads/s | 3,766 MiB | 99.995% | 0.023% |
 
-These numbers are for chromosome 20 only. `bwa-mem2` has higher placement agreement with the original bwa-mem BAM (99.995% vs 99.950% in GIAB high-confidence regions), and all three baseline tools have fewer misplaced reads with MAPQ 20 or more, across all reads that had MAPQ 20 or more in the original BAM (0.180% for `synapton` vs 0.158% for `strobealign`, 0.077% for `minimap2` and 0.023% for `bwa-mem2`).
+These numbers are for chromosome 20 only. On this chromosome 20 test, `synapton` (CPU) is about 1.07 times faster than `strobealign`, 3.0 times faster than `minimap2` and 5.1 times faster than `bwa-mem2`, and uses less memory than all three. `bwa-mem2` has higher placement agreement with the original bwa-mem BAM (99.995% vs 99.950% in GIAB high-confidence regions). `synapton` has fewer misplaced reads at MAPQ 20 or more (0.021% vs 0.023% for `bwa-mem2`, 0.077% for `minimap2` and 0.158% for `strobealign`), while assigning MAPQ 20 or more to 91.8% of mapped reads (vs 94.0% for `bwa-mem2`).
 
 ## License
 
