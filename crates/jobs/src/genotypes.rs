@@ -50,23 +50,30 @@ impl Verdict {
 }
 
 fn combine(kept: SiteCall, added: SiteCall, reference: Option<Allele>) -> SiteCall {
-	let pick = |current: Allele, other: Allele| {
-		if Some(current) == reference {
-			other
-		} else {
-			current
+	let Some(reference) = reference else {
+		return kept;
+	};
+	let merged = |slots: &mut [Allele], others: &[Allele]| {
+		let mut variants = others.iter().filter(|&&allele| allele != reference);
+		for slot in slots.iter_mut().filter(|slot| **slot == reference) {
+			if let Some(&variant) = variants.next() {
+				*slot = variant;
+			}
 		}
+		variants.next().is_none()
 	};
 	let genotype = match (kept.genotype, added.genotype) {
 		(Genotype::Pair(first, second), Genotype::Pair(other, then)) => {
-			Genotype::Pair(pick(first, other), pick(second, then))
+			let mut slots = [first, second];
+			merged(&mut slots, &[other, then]).then_some(Genotype::Pair(slots[0], slots[1]))
 		}
 		(Genotype::Hemizygous(only), Genotype::Hemizygous(other)) => {
-			Genotype::Hemizygous(pick(only, other))
+			let mut slots = [only];
+			merged(&mut slots, &[other]).then_some(Genotype::Hemizygous(slots[0]))
 		}
-		(genotype, _) => genotype,
+		(genotype, _) => Some(genotype),
 	};
-	SiteCall { genotype, ..kept }
+	genotype.map_or(SiteCall::MISSING, |genotype| SiteCall { genotype, ..kept })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -512,13 +519,15 @@ impl<'a> Collector<'a> {
 		let Some(reference) = reference else {
 			return Verdict::Skip;
 		};
-		if offset == 0 {
-			let base = alleles.get(0).and_then(|bytes| bytes.first()).copied();
-			let known = base.and_then(allele_of);
-			if known.is_some() && known != Some(reference) && known != alternate {
-				return Verdict::Missing;
-			}
+		let known = alleles
+			.get(0)
+			.and_then(|bytes| bytes.get(offset))
+			.copied()
+			.and_then(allele_of);
+		if known.is_some() && known != Some(reference) && known != alternate {
+			return Verdict::Missing;
 		}
+		let reference = known.unwrap_or(reference);
 		if !passed {
 			return Verdict::Missing;
 		}
