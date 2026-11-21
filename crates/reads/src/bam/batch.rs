@@ -66,7 +66,7 @@ impl RecordBatch {
 		})
 	}
 
-	pub fn iter(&self) -> impl Iterator<Item = Result<Located<'_>, RecordError>> {
+	pub fn iter(&self) -> impl Iterator<Item = Result<Located<'_>, RecordError>> + Clone {
 		(0..self.len()).map(|index| self.at(index))
 	}
 

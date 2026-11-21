@@ -1,6 +1,6 @@
 use std::io::{self, BufRead, Read};
 
-use super::{Block, BlockReader, Input, VirtualOffset};
+use super::{Block, BlockReader, Input, Readahead, VirtualOffset};
 use crate::Workers;
 
 #[derive(Debug)]
@@ -12,8 +12,12 @@ pub struct BgzfReader {
 
 impl BgzfReader {
 	pub fn new(input: Input, workers: &Workers) -> Self {
+		Self::with_readahead(input, workers, Readahead::DEFAULT)
+	}
+
+	pub fn with_readahead(input: Input, workers: &Workers, readahead: Readahead) -> Self {
 		Self {
-			blocks: BlockReader::new(input, workers),
+			blocks: BlockReader::with_readahead(input, workers, readahead),
 			current: Block {
 				offset: 0,
 				compressed_len: 0,

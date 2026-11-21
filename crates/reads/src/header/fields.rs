@@ -36,4 +36,18 @@ impl Fields {
 	pub(crate) fn push(&mut self, field: Field) {
 		self.entries.push(field);
 	}
+
+	pub(crate) fn set(&mut self, tag: [u8; 2], value: &str) {
+		match self.entries.iter_mut().find(|field| field.tag == tag) {
+			Some(field) => value.clone_into(&mut field.value),
+			None => self.entries.push(Field {
+				tag,
+				value: value.to_owned(),
+			}),
+		}
+	}
+
+	pub(crate) fn remove(&mut self, tag: [u8; 2]) {
+		self.entries.retain(|field| field.tag != tag);
+	}
 }

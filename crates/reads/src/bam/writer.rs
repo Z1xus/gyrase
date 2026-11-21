@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use gyrase_io::{BgzfWriter, BlockPosition, Finished, Level, Workers};
+use gyrase_io::{BgzfWriter, BlockPosition, Finished, Level, VirtualOffset, Workers};
 
 use crate::error::{BamError, Error};
 use crate::header::Header;
@@ -29,6 +29,10 @@ impl<W: Write + Send + 'static> BamWriter<W> {
 
 	pub fn position(&self) -> BlockPosition {
 		self.inner.position()
+	}
+
+	pub fn resolve(&mut self, position: BlockPosition) -> Option<VirtualOffset> {
+		self.inner.resolve(position)
 	}
 
 	pub fn write(&mut self, record: RecordRef<'_>) -> Result<Written, Error> {

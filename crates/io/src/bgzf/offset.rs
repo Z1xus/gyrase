@@ -28,3 +28,9 @@ pub struct BlockPosition {
 	pub ordinal: u64,
 	pub within: u16,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Chunk {
+	pub begin: VirtualOffset,
+	pub end: VirtualOffset,
+}

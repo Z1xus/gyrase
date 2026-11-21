@@ -1,6 +1,6 @@
-use gyrase_io::VirtualOffset;
+use gyrase_io::{Chunk, VirtualOffset};
 
-use crate::{Bin, Chunk, Geometry, RefIndex};
+use crate::{Bin, Geometry, RefIndex};
 
 const CHILDREN_PER_BIN_BITS: u32 = 3;
 const FIRST_CHILD_RESIDUE: u32 = 1;

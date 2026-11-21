@@ -3,11 +3,11 @@ use std::io::Read;
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread;
 
-use gyrase_io::{Block, BlockReader, BlockSpan, Input, VirtualOffset, Workers};
+use gyrase_io::{Block, BlockReader, BlockSpan, Chunk, Input, VirtualOffset, Workers};
 
 use super::batch::{Located, RecordBatch};
 use super::frame::Framer;
-use super::query::{Chunk, IntervalSet, Query};
+use super::query::{IntervalSet, Query};
 use crate::error::{Error, HeaderError};
 use crate::header::{ByteSource, Header};
 
@@ -51,7 +51,7 @@ impl BamReader {
 		let header = Header::read_bam(&mut cursor)?;
 		let (leftover, start) = cursor.into_rest();
 		let chunk = Chunk {
-			start,
+			begin: start,
 			end: VirtualOffset::from_raw(u64::MAX),
 		};
 		let batches = BatchReader::new(
@@ -74,7 +74,7 @@ impl BamReader {
 		let spans = chunks
 			.iter()
 			.map(|chunk| BlockSpan {
-				first: chunk.start.block(),
+				first: chunk.begin.block(),
 				last: chunk.end.block(),
 			})
 			.collect();

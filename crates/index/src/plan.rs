@@ -1,9 +1,9 @@
 use std::cmp::Reverse;
 
 use gyrase_genome::Interval;
-use gyrase_io::BlockSpan;
+use gyrase_io::{BlockSpan, Chunk};
 
-use crate::{Chunk, Index};
+use crate::Index;
 
 pub const DEFAULT_MAX_GAP: u64 = 4 << 20;
 

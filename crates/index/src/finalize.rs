@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use gyrase_io::VirtualOffset;
+use gyrase_io::{Chunk, VirtualOffset};
 
 use crate::order::bucket_order;
 use crate::reference::fill_loff;
-use crate::{Bin, Chunk, Error, Geometry, RefIndex};
+use crate::{Bin, Error, Geometry, RefIndex};
 
 const MIN_MARKER_BLOCKS: u64 = 0x10000;
 const UNSET: u64 = u64::MAX;

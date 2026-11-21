@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use gyrase_io::VirtualOffset;
+use gyrase_io::{Chunk, VirtualOffset};
 
-use crate::{Chunk, Error, Geometry};
+use crate::{Error, Geometry};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bin {

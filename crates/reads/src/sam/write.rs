@@ -17,11 +17,15 @@ pub struct SamWriter<W: Write> {
 impl<W: Write> SamWriter<W> {
 	pub fn new(mut inner: W, header: &Header) -> Result<Self, Error> {
 		inner.write_all(header.text().as_bytes())?;
-		Ok(Self {
+		Ok(Self::headerless(inner, header))
+	}
+
+	pub fn headerless(inner: W, header: &Header) -> Self {
+		Self {
 			inner,
 			header: header.clone(),
 			line: Vec::with_capacity(2 * FLUSH_BYTES),
-		})
+		}
 	}
 
 	pub fn write(&mut self, record: RecordRef<'_>) -> Result<(), Error> {

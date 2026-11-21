@@ -9,6 +9,8 @@ use crate::record::RecordRef;
 
 const MIN_DIFFERENT_CONTIG_MAPQ: u8 = 5;
 
+const RANGE_LEN: usize = 4096;
+
 type Row<'a> = (&'a [u64; 2], &'a str, Option<&'a [u64; 2]>);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -207,11 +209,16 @@ pub fn flagstat(reader: &mut BamReader, workers: &Workers) -> Result<Flagstat, E
 }
 
 fn count_batch(batch: &RecordBatch, workers: &Workers) -> Result<Flagstat, RecordError> {
+	let ranges = batch.len().div_ceil(RANGE_LEN);
 	workers.install(|| {
-		(0..batch.len())
+		(0..ranges)
 			.into_par_iter()
-			.try_fold(Flagstat::default, |mut stats, index| {
-				stats.add(batch.at(index)?.record);
+			.map(|range| {
+				let first = range * RANGE_LEN;
+				let mut stats = Flagstat::default();
+				for index in first..(first + RANGE_LEN).min(batch.len()) {
+					stats.add(batch.at(index)?.record);
+				}
 				Ok(stats)
 			})
 			.try_reduce(Flagstat::default, |mut left, right| {

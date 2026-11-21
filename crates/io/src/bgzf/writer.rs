@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::thread::{self, JoinHandle};
 
-use crossbeam_channel::{Receiver, Sender, bounded};
+use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use libdeflater::{Compressor, Crc};
 use rayon::prelude::*;
 
@@ -22,6 +22,8 @@ pub struct BgzfWriter<W: Write + Send + 'static> {
 	batch: Vec<Vec<u8>>,
 	ordinal: u64,
 	batches: Sender<Vec<Vec<u8>>>,
+	completed: Receiver<Vec<u64>>,
+	offsets: Vec<u64>,
 	compressor: JoinHandle<Result<Finished<W>, Error>>,
 }
 
@@ -44,15 +46,30 @@ impl<W> Finished<W> {
 impl<W: Write + Send + 'static> BgzfWriter<W> {
 	pub fn new(inner: W, level: Level, workers: &Workers) -> Self {
 		let (batches, received) = bounded(BATCHES_IN_FLIGHT);
+		let (reported, completed) = unbounded();
 		let workers = workers.clone();
-		let compressor = thread::spawn(move || compress(inner, level, &received, &workers));
+		let compressor =
+			thread::spawn(move || compress(inner, level, &received, &reported, &workers));
 		Self {
 			payload: Vec::with_capacity(MAX_PAYLOAD_LEN),
 			batch: Vec::with_capacity(BLOCKS_PER_BATCH),
 			ordinal: 0,
 			batches,
+			completed,
+			offsets: Vec::new(),
 			compressor,
 		}
+	}
+
+	pub fn resolve(&mut self, position: BlockPosition) -> Option<VirtualOffset> {
+		while let Ok(batch) = self.completed.try_recv() {
+			self.offsets.extend(batch);
+		}
+		let index = usize::try_from(position.ordinal).ok()?;
+		Some(VirtualOffset::new(
+			*self.offsets.get(index)?,
+			position.within,
+		))
 	}
 
 	pub fn position(&self) -> BlockPosition {
@@ -113,6 +130,7 @@ fn compress<W: Write>(
 	mut inner: W,
 	level: Level,
 	batches: &Receiver<Vec<Vec<u8>>>,
+	reported: &Sender<Vec<u64>>,
 	workers: &Workers,
 ) -> Result<Finished<W>, Error> {
 	let mut block_offsets = Vec::new();
@@ -127,12 +145,16 @@ fn compress<W: Write>(
 				)
 				.collect::<Result<Vec<_>, _>>()
 		})?;
+		let first = block_offsets.len();
 		for block in blocks {
 			block_offsets.push(offset);
 			inner.write_all(&block)?;
 			offset += block.len() as u64;
 		}
+		let _ = reported.send(block_offsets.get(first..).unwrap_or_default().to_vec());
 	}
+	block_offsets.push(offset);
+	let _ = reported.send(vec![offset]);
 	inner.write_all(&EMPTY_BLOCK)?;
 	inner.flush()?;
 	Ok(Finished {

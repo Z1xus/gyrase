@@ -20,6 +20,12 @@ pub enum Error {
 	Fastq(#[from] FastqError),
 	#[error(transparent)]
 	Stats(#[from] StatsError),
+	#[error(transparent)]
+	Index(#[from] gyrase_index::Error),
+	#[error(transparent)]
+	Sort(#[from] SortError),
+	#[error(transparent)]
+	Mark(#[from] MarkError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -96,6 +102,8 @@ pub enum BamError {
 	MisalignedChunk,
 	#[error("records are not on a block boundary")]
 	UnexpectedBlock,
+	#[error("a written record has no known file offset")]
+	UnresolvedOffset,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,5 +155,21 @@ pub enum FastqError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum StatsError {
 	#[error("file is not position sorted")]
+	NotSorted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SortError {
+	#[error("cannot reserve {bytes} bytes for the sort buffer")]
+	Reserve { bytes: usize },
+	#[error("a spilled run ends inside a record")]
+	TruncatedRun,
+	#[error("a record is larger than the sort memory budget")]
+	RecordTooLarge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum MarkError {
+	#[error("input is not in coordinate order")]
 	NotSorted,
 }

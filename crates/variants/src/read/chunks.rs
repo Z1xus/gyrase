@@ -2,8 +2,7 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, BufRead, Read};
 
-use gyrase_index::Chunk;
-use gyrase_io::{Block, BlockReader, BlockSpan, Input, VirtualOffset, Workers};
+use gyrase_io::{Block, BlockReader, BlockSpan, Chunk, Input, VirtualOffset, Workers};
 
 use crate::Error;
 

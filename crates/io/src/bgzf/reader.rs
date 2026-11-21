@@ -11,9 +11,22 @@ use rayon::prelude::*;
 use super::block::{Block, FIXED_HEADER_LEN, Frame, block_len, extra_len};
 use crate::{Error, Workers};
 
-const BATCH_BYTES: usize = 16 << 20;
-const READ_BYTES: usize = 8 << 20;
-const BATCHES_IN_FLIGHT: usize = 4;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Readahead {
+	batch_bytes: usize,
+	batches: usize,
+}
+
+impl Readahead {
+	pub const DEFAULT: Self = Self {
+		batch_bytes: 16 << 20,
+		batches: 4,
+	};
+	pub const COMPACT: Self = Self {
+		batch_bytes: 1 << 20,
+		batches: 1,
+	};
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockSpan {
@@ -46,9 +59,13 @@ pub struct BlockReader {
 
 impl BlockReader {
 	pub fn new(input: Input, workers: &Workers) -> Self {
-		let (frames_out, frames_in) = bounded(BATCHES_IN_FLIGHT);
-		let (blocks_out, blocks_in) = bounded(BATCHES_IN_FLIGHT);
-		thread::spawn(move || scan(input, &frames_out));
+		Self::with_readahead(input, workers, Readahead::DEFAULT)
+	}
+
+	pub fn with_readahead(input: Input, workers: &Workers, readahead: Readahead) -> Self {
+		let (frames_out, frames_in) = bounded(readahead.batches);
+		let (blocks_out, blocks_in) = bounded(readahead.batches);
+		thread::spawn(move || scan(input, &frames_out, readahead));
 		let workers = workers.clone();
 		thread::spawn(move || inflate(&frames_in, &blocks_out, &workers));
 		Self {
@@ -85,17 +102,22 @@ impl Iterator for BlockReader {
 	}
 }
 
-fn scan(input: Input, out: &Sender<Result<Vec<Frame>, Error>>) {
+fn scan(input: Input, out: &Sender<Result<Vec<Frame>, Error>>, readahead: Readahead) {
+	let buffer = readahead.batch_bytes.min(8 << 20);
 	let result = match input {
 		Input::Stream(stream) => scan_stream(
-			&mut BufReader::with_capacity(READ_BYTES, stream),
+			&mut BufReader::with_capacity(buffer, stream),
 			0,
 			u64::MAX,
 			out,
+			readahead,
 		),
-		Input::Spans { file, spans } => {
-			scan_spans(&mut BufReader::with_capacity(READ_BYTES, file), &spans, out)
-		}
+		Input::Spans { file, spans } => scan_spans(
+			&mut BufReader::with_capacity(buffer, file),
+			&spans,
+			out,
+			readahead,
+		),
 	};
 	if let Err(error) = result {
 		let _ = out.send(Err(error));
@@ -106,10 +128,11 @@ fn scan_spans(
 	file: &mut BufReader<File>,
 	spans: &[BlockSpan],
 	out: &Sender<Result<Vec<Frame>, Error>>,
+	readahead: Readahead,
 ) -> Result<(), Error> {
 	for span in spans {
 		file.seek(SeekFrom::Start(span.first))?;
-		scan_stream(file, span.first, span.last, out)?;
+		scan_stream(file, span.first, span.last, out, readahead)?;
 	}
 	Ok(())
 }
@@ -119,6 +142,7 @@ fn scan_stream(
 	mut offset: u64,
 	last: u64,
 	out: &Sender<Result<Vec<Frame>, Error>>,
+	readahead: Readahead,
 ) -> Result<(), Error> {
 	let mut batch = Vec::new();
 	let mut batch_bytes = 0;
@@ -129,7 +153,7 @@ fn scan_stream(
 		offset += frame.bytes.len() as u64;
 		batch_bytes += frame.bytes.len();
 		batch.push(frame);
-		if batch_bytes >= BATCH_BYTES {
+		if batch_bytes >= readahead.batch_bytes {
 			out.send(Ok(std::mem::take(&mut batch)))
 				.map_err(|_| Error::Disconnected)?;
 			batch_bytes = 0;

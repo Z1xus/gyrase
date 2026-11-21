@@ -1,9 +1,8 @@
 use std::hint::black_box;
 
-use gyrase_io::{Block, VirtualOffset};
+use gyrase_io::{Block, Chunk, VirtualOffset};
 
 use super::batch::{Entry, Location, RecordBatch};
-use super::query::Chunk;
 use crate::bytes::u32_le;
 use crate::error::{BamError, Error};
 
@@ -68,8 +67,8 @@ impl Framer {
 		match self.walk {
 			Walk::Waiting { chunk } => {
 				let current = *self.chunks.get(chunk).ok_or(BamError::UnexpectedBlock)?;
-				let within = usize::from(current.start.within());
-				if block.offset != current.start.block() || within > block.data.len() {
+				let within = usize::from(current.begin.within());
+				if block.offset != current.begin.block() || within > block.data.len() {
 					return Err(BamError::MisalignedChunk);
 				}
 				self.walk = Walk::Inside { chunk };

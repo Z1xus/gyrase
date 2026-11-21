@@ -51,7 +51,7 @@ impl CramBatch {
 			.record(index - before)
 	}
 
-	pub fn iter(&self) -> impl Iterator<Item = Result<RecordRef<'_>, RecordError>> {
+	pub fn iter(&self) -> impl Iterator<Item = Result<RecordRef<'_>, RecordError>> + Clone {
 		(0..self.len()).map(|index| self.at(index))
 	}
 

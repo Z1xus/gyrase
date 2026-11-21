@@ -1,6 +1,5 @@
 mod binning;
 mod builder;
-mod chunk;
 mod crai;
 mod decode;
 mod encode;
@@ -16,7 +15,6 @@ mod wire;
 
 pub use binning::Geometry;
 pub use builder::{Builder, Entry, Placement};
-pub use chunk::Chunk;
 pub use crai::{Crai, CraiEntry, CraiReference};
 pub use error::Error;
 pub use index::{Format, Index};

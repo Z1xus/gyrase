@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::mem;
 
 use gyrase_genome::{ContigId, Interval};
-use gyrase_io::VirtualOffset;
+use gyrase_io::{Chunk, VirtualOffset};
 
 use crate::finalize::{Draft, finalize};
 use crate::wire::MAX_REFERENCES;
-use crate::{Chunk, Error, Geometry, Index, RefIndex};
+use crate::{Error, Geometry, Index, RefIndex};
 
 const UNSET: u64 = u64::MAX;
 

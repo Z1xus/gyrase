@@ -1,13 +1,7 @@
 use gyrase_genome::{ContigId, Interval};
-use gyrase_io::VirtualOffset;
+use gyrase_io::Chunk;
 
 use crate::record::RecordRef;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Chunk {
-	pub start: VirtualOffset,
-	pub end: VirtualOffset,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Query {
@@ -69,12 +63,12 @@ impl IntervalSet {
 }
 
 fn merge_chunks(mut chunks: Vec<Chunk>) -> Vec<Chunk> {
-	chunks.retain(|chunk| chunk.start < chunk.end);
+	chunks.retain(|chunk| chunk.begin < chunk.end);
 	chunks.sort_unstable();
 	let mut merged: Vec<Chunk> = Vec::with_capacity(chunks.len());
 	for chunk in chunks {
 		match merged.last_mut() {
-			Some(last) if chunk.start <= last.end => last.end = last.end.max(chunk.end),
+			Some(last) if chunk.begin <= last.end => last.end = last.end.max(chunk.end),
 			_ => merged.push(chunk),
 		}
 	}

@@ -26,6 +26,27 @@ pub enum Line {
 	Other(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortOrder {
+	Unknown,
+	Unsorted,
+	QueryName,
+	Coordinate,
+}
+
+impl SortOrder {
+	const fn as_str(self) -> &'static str {
+		match self {
+			Self::Unknown => "unknown",
+			Self::Unsorted => "unsorted",
+			Self::QueryName => "queryname",
+			Self::Coordinate => "coordinate",
+		}
+	}
+}
+
+const DEFAULT_VERSION: &str = "1.6";
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Header {
 	lines: Vec<Line>,
@@ -77,6 +98,28 @@ impl Header {
 
 	pub fn push_header_line(&mut self, fields: Fields) {
 		self.lines.push(Line::Header(fields));
+	}
+
+	pub fn set_sort_order(&mut self, order: SortOrder) {
+		let existing = self.lines.iter_mut().find_map(|line| match line {
+			Line::Header(fields) => Some(fields),
+			_ => None,
+		});
+		match existing {
+			Some(fields) => {
+				fields.set(*b"SO", order.as_str());
+				fields.remove(*b"GO");
+				fields.remove(*b"SS");
+			}
+			None => self.lines.insert(
+				0,
+				Line::Header(
+					Fields::new()
+						.with(*b"VN", DEFAULT_VERSION)
+						.with(*b"SO", order.as_str()),
+				),
+			),
+		}
 	}
 
 	pub fn push_reference(&mut self, reference: Reference) -> Result<ContigId, HeaderError> {

@@ -1,8 +1,8 @@
 use crate::reference::fill_loff;
 use crate::tabix::FIXED_LEN;
 use crate::wire::{Cursor, MAX_REFERENCES};
-use crate::{Bin, Chunk, Error, Format, Geometry, Index, RefIndex};
-use gyrase_io::VirtualOffset;
+use crate::{Bin, Error, Format, Geometry, Index, RefIndex};
+use gyrase_io::{Chunk, VirtualOffset};
 
 const REFERENCE_MIN_BYTES: usize = 4;
 const CHUNK_BYTES: usize = 16;

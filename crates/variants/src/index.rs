@@ -1,6 +1,6 @@
 use gyrase_genome::{ContigId, Interval};
-use gyrase_index::{Builder, Chunk, Entry, Geometry, Index, Placement, TabixHeader};
-use gyrase_io::{BlockPosition, Finished};
+use gyrase_index::{Builder, Entry, Geometry, Index, Placement, TabixHeader};
+use gyrase_io::{BlockPosition, Chunk, Finished};
 
 use crate::Error;
 use crate::header::Header;
