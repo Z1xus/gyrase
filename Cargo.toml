@@ -15,6 +15,7 @@ gyrase-genome = { path = "crates/genome" }
 gyrase-index = { path = "crates/index" }
 gyrase-io = { path = "crates/io" }
 gyrase-jobs = { path = "crates/jobs" }
+gyrase-pileup = { path = "crates/pileup" }
 gyrase-reads = { path = "crates/reads" }
 gyrase-variants = { path = "crates/variants" }
 bzip2 = "0.6.1"
