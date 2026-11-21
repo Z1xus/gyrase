@@ -9,9 +9,19 @@ pub enum Stage {
 	Index,
 	Align,
 	Sort,
-	Markdup,
 	Call,
 	Export,
+}
+
+impl Stage {
+	pub const fn weight(self) -> u64 {
+		match self {
+			Self::Reference | Self::Index => 2,
+			Self::Align => 40,
+			Self::Sort | Self::Call => 8,
+			Self::Export => 1,
+		}
+	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -6,6 +6,8 @@ pub enum Error {
 	#[error("{path}: {source}")]
 	Open { path: PathBuf, source: io::Error },
 	#[error("{path}: {source}")]
+	Write { path: PathBuf, source: io::Error },
+	#[error("{path}: {source}")]
 	Read {
 		path: PathBuf,
 		source: gyrase_io::Error,

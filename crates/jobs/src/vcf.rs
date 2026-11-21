@@ -9,6 +9,7 @@ use gyrase_variants::{
 	Encoded, Format, Formatter, Header, IndexCollector, IndexKind, Record, Writer,
 };
 
+use crate::partial::{Partial, suffixed};
 use crate::{Alignments, Error};
 
 type Sink = BgzfWriter<BufWriter<File>>;
@@ -18,6 +19,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug)]
 pub struct Vcf {
 	path: PathBuf,
+	partial: Partial,
 	header: Header,
 	keys: Keys,
 	writer: Writer<Sink>,
@@ -49,13 +51,11 @@ impl Vcf {
 			allele_depths: key(&header, "AD")?,
 			likelihoods: key(&header, "PL")?,
 		};
-		let file = File::create(path).map_err(|source| Error::Open {
-			path: path.to_owned(),
-			source,
-		})?;
+		let (partial, file) = Partial::create(path)?;
 		let sink = BgzfWriter::new(BufWriter::new(file), Level::DEFAULT, workers);
 		Ok(Self {
 			path: path.to_owned(),
+			partial,
 			writer: Writer::new(sink, &header, Format::Vcf)?,
 			header,
 			keys,
@@ -85,14 +85,11 @@ impl Vcf {
 		let index = self
 			.collector
 			.build(&finished, &self.header, IndexKind::Vcf)?;
-		let mut index_path = self.path.clone().into_os_string();
-		index_path.push(".tbi");
-		let index_path = PathBuf::from(index_path);
-		let file = File::create(&index_path).map_err(|source| Error::Open {
-			path: index_path,
-			source,
-		})?;
-		index.write(IndexFormat::Tbi, BufWriter::new(file), workers)?;
+		drop(finished);
+		self.partial.commit()?;
+		let (partial, file) = Partial::create(&suffixed(&self.path, ".tbi"))?;
+		index.write(IndexFormat::Tbi, file, workers)?;
+		partial.commit()?;
 		Ok(self.path)
 	}
 

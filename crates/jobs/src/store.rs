@@ -1,11 +1,12 @@
 use std::env;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use flate2::bufread::MultiGzDecoder;
 use gyrase_genome::{Build, Reference};
 
+use crate::partial::{Partial, suffixed};
 use crate::{Cancel, Error};
 
 const APP: &str = "gyrase";
@@ -60,9 +61,8 @@ impl Store {
 		mut report: impl FnMut(Download),
 	) -> Result<PathBuf, Error> {
 		let path = self.reference_path(build);
-		let partial = path.with_extension("fa.part");
 		let parent = path.parent().unwrap_or(&self.root);
-		fs::create_dir_all(parent).map_err(|source| Error::Open {
+		fs::create_dir_all(parent).map_err(|source| Error::Write {
 			path: parent.to_owned(),
 			source,
 		})?;
@@ -72,11 +72,12 @@ impl Store {
 			inner: response.into_body().into_reader(),
 			received: 0,
 		};
-		let created = |source| Error::Open {
-			path: partial.clone(),
+		let created = |source| Error::Write {
+			path: path.clone(),
 			source,
 		};
-		let mut output = BufWriter::new(File::create(&partial).map_err(created)?);
+		let (partial, file) = Partial::create(&path)?;
+		let mut output = BufWriter::new(file);
 		let mut decoder = MultiGzDecoder::new(BufReader::with_capacity(COPY_LEN, &mut metered));
 		let mut buffer = vec![0; COPY_LEN];
 		loop {
@@ -98,13 +99,9 @@ impl Store {
 			.map_err(|error| created(error.into_error()))?
 			.sync_all()
 			.map_err(created)?;
-		verify(&partial, build)?;
-		fs::rename(&partial, &path).map_err(created)?;
-		fs::rename(
-			partial.with_extension("part.fai"),
-			path.with_extension("fa.fai"),
-		)
-		.map_err(created)?;
+		verify(partial.path(), build)?;
+		partial.commit()?;
+		fs::rename(suffixed(&path, ".part.fai"), suffixed(&path, ".fai")).map_err(created)?;
 		Ok(path)
 	}
 }

@@ -11,7 +11,8 @@ use gyrase_genome::{Build, Reference};
 use gyrase_io::Workers;
 
 use crate::alignments::{header, indexed};
-use crate::bam::{coordinate_sorted, create, index, sort, sort_budget};
+use crate::bam::{coordinate_sorted, index, sort, sort_budget};
+use crate::partial::Partial;
 use crate::{
 	Alignments, Calling, Cancel, Error, Estimate, Input, Kind, Progress, Resources, Sample, Source,
 	Stage, Store, Targets, Vcf, shards,
@@ -186,10 +187,9 @@ impl Plan {
 					build,
 					generated: now()?,
 				};
-				raw.push((
-					*format,
-					write_raw_data(&panel, &calls, &settings, create(path)?)?,
-				));
+				let (partial, file) = Partial::create(path)?;
+				raw.push((*format, write_raw_data(&panel, &calls, &settings, file)?));
+				partial.commit()?;
 				report(estimate.advance(count(index + 1), Instant::now()));
 			}
 		}

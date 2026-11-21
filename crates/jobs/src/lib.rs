@@ -5,6 +5,7 @@ mod cancel;
 mod error;
 mod export;
 mod input;
+mod partial;
 mod plan;
 mod progress;
 mod resources;

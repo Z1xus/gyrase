@@ -1,6 +1,5 @@
-use std::ffi::OsString;
-use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::path::Path;
 use std::time::Instant;
 
 use gyrase_index::{Format, Index};
@@ -9,6 +8,7 @@ use gyrase_reads::{
 	BamReader, Header, Line, MarkSettings, MarkStats, RecordBatch, Sorter, index_bam, index_layout,
 };
 
+use crate::partial::{Partial, suffixed};
 use crate::{Cancel, Error, Estimate, Input, Progress, Stage};
 
 const MIN_SORT_MEMORY: u64 = 256 << 20;
@@ -93,8 +93,7 @@ pub(crate) fn write_sorted(
 	let mut sorter = Sorter::new(header, budget, directory, workers)?;
 	feed(&mut sorter)?;
 	cancel.check()?;
-	let partial = suffixed(output, ".part");
-	let file = create(&partial)?;
+	let (partial, file) = Partial::create(output)?;
 	let (written, stats) = match marking {
 		Some(settings) => {
 			let (written, stats) = sorter.finish_marking(file, Level::DEFAULT, settings)?;
@@ -102,7 +101,8 @@ pub(crate) fn write_sorted(
 		}
 		None => (sorter.finish(file, Level::DEFAULT)?, None),
 	};
-	rename(&partial, output)?;
+	drop(written.output);
+	partial.commit()?;
 	write_index(&written.index, written.format, output, workers)?;
 	Ok(stats)
 }
@@ -115,34 +115,14 @@ fn write_index(index: &Index, format: Format, bam: &Path, workers: &Workers) -> 
 			Format::Bai | Format::Tbi => ".bai",
 		},
 	);
-	let partial = suffixed(&path, ".part");
-	index.write(format, create(&partial)?, workers)?;
-	rename(&partial, &path)
-}
-
-pub(crate) fn suffixed(path: &Path, suffix: &str) -> PathBuf {
-	let mut name = OsString::from(path);
-	name.push(suffix);
-	PathBuf::from(name)
+	let (partial, file) = Partial::create(&path)?;
+	index.write(format, file, workers)?;
+	partial.commit()
 }
 
 fn open(path: &Path) -> Result<File, Error> {
 	File::open(path).map_err(|source| Error::Open {
 		path: path.to_owned(),
-		source,
-	})
-}
-
-pub(crate) fn create(path: &Path) -> Result<File, Error> {
-	File::create(path).map_err(|source| Error::Open {
-		path: path.to_owned(),
-		source,
-	})
-}
-
-fn rename(from: &Path, to: &Path) -> Result<(), Error> {
-	fs::rename(from, to).map_err(|source| Error::Open {
-		path: to.to_owned(),
 		source,
 	})
 }
