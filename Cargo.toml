@@ -12,6 +12,7 @@ repository = "https://github.com/Z1xus/gyrase"
 
 [workspace.dependencies]
 gyrase-call = { path = "crates/call" }
+gyrase-extract = { path = "crates/extract" }
 gyrase-genome = { path = "crates/genome" }
 gyrase-index = { path = "crates/index" }
 gyrase-io = { path = "crates/io" }
