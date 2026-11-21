@@ -470,6 +470,10 @@ pub(super) fn load(path: &Path, workers: &Workers) -> Result<Index, Error> {
 	})
 }
 
+pub(super) fn current(path: &Path) -> bool {
+	open(path).is_ok()
+}
+
 pub(super) fn reuse(
 	path: &Path,
 	reference: PackedReference,

@@ -63,6 +63,10 @@ impl Index {
 		Ok(index)
 	}
 
+	pub fn is_current(path: &Path) -> bool {
+		file::current(path)
+	}
+
 	pub fn load(path: &Path, workers: &Workers) -> Result<Self, Error> {
 		file::load(path, workers)
 	}

@@ -10,6 +10,7 @@ use gyrase_extract::{
 use gyrase_genome::{Build, Reference};
 use gyrase_io::Workers;
 use gyrase_reads::Header;
+use synapton::Index;
 
 use crate::align::{self, Alignment};
 use crate::alignments::{header, indexed};
@@ -116,7 +117,7 @@ impl Plan {
 		let aligned = matches!(sample.source, Source::Reads(_));
 		let mut stages = Vec::new();
 		if store.reference(build).is_none()
-			|| (aligned && !store.aligner_index_path(build).is_file())
+			|| (aligned && !Index::is_current(&store.aligner_index_path(build)))
 		{
 			stages.push(Stage::Reference);
 		}
