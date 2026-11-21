@@ -2,7 +2,7 @@
 
 Turn whole-genome DNA files into a VCF and raw genotype files for DNA match and ancestry sites.
 
-<p align="center"><img src="https://raw.githubusercontent.com/Z1xus/gyrase/assets/progress.png" width="512" alt="gyrase aligning a FASTQ file"></p>
+<p align="center"><img src="https://github.com/Z1xus/gyrase/blob/assets/progress.png?raw=true" width="512" alt="gyrase aligning a FASTQ file"></p>
 
 ## What it does
 
