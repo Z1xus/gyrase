@@ -33,7 +33,7 @@ pub(crate) struct Mapper<'a> {
 	index: &'a Index,
 	hits: SeedHits,
 	seeder: Seeder,
-	seeds: [Vec<Seed>; 2],
+	seeds: [[Vec<Seed>; 2]; 2],
 	probes: Vec<Probe>,
 	quick: Vec<(Strand, u32, Probe)>,
 	misses: Vec<usize>,
@@ -50,7 +50,7 @@ impl<'a> Mapper<'a> {
 				relaxed: config.relaxed_seed_hits,
 			},
 			seeder: Seeder::new(index.config()),
-			seeds: [Vec::new(), Vec::new()],
+			seeds: [[Vec::new(), Vec::new()], [Vec::new(), Vec::new()]],
 			probes: Vec::new(),
 			quick: Vec::new(),
 			misses: Vec::new(),
@@ -59,11 +59,16 @@ impl<'a> Mapper<'a> {
 		}
 	}
 
-	pub(crate) fn chains(&mut self, forward: &[u8], chains: &mut Vec<Chain>) -> Mapped {
-		self.seeder.extract_both(forward, &mut self.seeds);
-		let mut repeat_fraction = self.pass(self.hits.first, chains);
+	pub(crate) fn extract(&mut self, slot: usize, forward: &[u8]) {
+		if let Some(seeds) = self.seeds.get_mut(slot) {
+			self.seeder.extract_both(forward, seeds);
+		}
+	}
+
+	pub(crate) fn chains(&mut self, slot: usize, chains: &mut Vec<Chain>) -> Mapped {
+		let mut repeat_fraction = self.pass(slot, self.hits.first, chains);
 		if chains.is_empty() && repeat_fraction > 0.0 {
-			repeat_fraction = self.pass(self.hits.relaxed, chains);
+			repeat_fraction = self.pass(slot, self.hits.relaxed, chains);
 		}
 		chains.sort_unstable_by(|left, right| {
 			right
@@ -75,14 +80,13 @@ impl<'a> Mapper<'a> {
 		Mapped { repeat_fraction }
 	}
 
-	pub(crate) fn locate(&mut self, forward: &[u8], found: &mut Vec<Diagonal>) {
+	pub(crate) fn locate(&mut self, slot: usize, found: &mut Vec<Diagonal>) {
 		found.clear();
-		self.seeder.extract_both(forward, &mut self.seeds);
 		self.quick.clear();
 		let mut touched = 0u64;
 		for (strand, seeds) in [Strand::Forward, Strand::Reverse]
 			.into_iter()
-			.zip(&self.seeds)
+			.zip(self.seeds.get(slot).into_iter().flatten())
 		{
 			let wanted = QUICK_SEEDS.min(seeds.len());
 			for step in 0..wanted {
@@ -122,17 +126,26 @@ impl<'a> Mapper<'a> {
 		});
 	}
 
-	fn pass(&mut self, cutoff: usize, chains: &mut Vec<Chain>) -> f32 {
+	fn pass(&mut self, slot: usize, cutoff: usize, chains: &mut Vec<Chain>) -> f32 {
 		chains.clear();
 		let mut repeat_fraction = 0.0f32;
 		for strand in [Strand::Forward, Strand::Reverse] {
-			repeat_fraction = repeat_fraction.max(self.chains_for(strand, cutoff, chains));
+			repeat_fraction = repeat_fraction.max(self.chains_for(slot, strand, cutoff, chains));
 		}
 		repeat_fraction
 	}
 
-	fn chains_for(&mut self, strand: Strand, cutoff: usize, chains: &mut Vec<Chain>) -> f32 {
-		let seeds = std::mem::take(&mut self.seeds[strand.index()]);
+	fn chains_for(
+		&mut self,
+		slot: usize,
+		strand: Strand,
+		cutoff: usize,
+		chains: &mut Vec<Chain>,
+	) -> f32 {
+		let seeds = self
+			.seeds
+			.get_mut(slot)
+			.map_or_else(Vec::new, |both| std::mem::take(&mut both[strand.index()]));
 		let seed_length = self.index.config().k;
 		let mut probes = std::mem::take(&mut self.probes);
 		probes.clear();
@@ -194,7 +207,9 @@ impl<'a> Mapper<'a> {
 			chains,
 		);
 		let total = seeds.len();
-		self.seeds[strand.index()] = seeds;
+		if let Some(both) = self.seeds.get_mut(slot) {
+			both[strand.index()] = seeds;
+		}
 		self.probes = probes;
 		if total == 0 {
 			0.0

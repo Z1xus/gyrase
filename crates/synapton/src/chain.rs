@@ -112,6 +112,10 @@ impl Chainer {
 	) {
 		anchors.sort_unstable();
 		anchors.dedup();
+		if let Some(chain) = single_diagonal(anchors, strand, seed_length, spans) {
+			chains.push(chain);
+			return;
+		}
 		let count = anchors.len();
 		let length = f32::from(u16::try_from(seed_length).unwrap_or(u16::MAX));
 		self.score(anchors, seed_length, spans);
@@ -161,6 +165,41 @@ impl Chainer {
 			}
 		}
 	}
+}
+
+fn single_diagonal(
+	anchors: &[u64],
+	strand: Strand,
+	seed_length: u32,
+	spans: &[ContigSpan],
+) -> Option<Chain> {
+	let (start, query) = unpack(*anchors.first()?);
+	let diagonal = i64_of(start) - i64_of(query);
+	let span_end = spans
+		.get(spans.partition_point(|found| found.end() <= start))?
+		.end();
+	let mut score = f32::from(u16::try_from(seed_length).unwrap_or(u16::MAX));
+	let mut previous = start;
+	for &anchor in anchors.get(1..)? {
+		let (reference, query) = unpack(anchor);
+		let gap = reference - previous;
+		if i64_of(reference) - i64_of(query) != diagonal
+			|| reference >= span_end
+			|| gap > MAX_REFERENCE_GAP
+		{
+			return None;
+		}
+		score += f32::from(u16::try_from(gap.min(u64::from(seed_length))).unwrap_or(0));
+		previous = reference;
+	}
+	Some(Chain {
+		strand,
+		score,
+		reference_start: start,
+		diagonal_low: diagonal,
+		diagonal_high: diagonal,
+		diagonal_middle: diagonal,
+	})
 }
 
 fn summarize(

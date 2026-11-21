@@ -198,12 +198,19 @@ impl<'a> Worker<'a> {
 		self.pending.clear();
 		self.done.clear();
 		self.done.resize(self.queries.len(), false);
-		if let Some(model) = fast {
-			for pair in 0..self.queries.len() / 2 {
-				self.fast_pair(pair, model);
+		self.repeats.clear();
+		for first in (0..self.queries.len()).step_by(2) {
+			let last = (first + 2).min(self.queries.len());
+			for end in first..last {
+				self.extract(end);
+			}
+			if let Some(model) = fast {
+				self.fast_pair(first / 2, model);
+			}
+			for end in first..last {
+				self.generate(end);
 			}
 		}
-		self.generate();
 		self.extend_pending();
 		settle(&mut self.candidates, &mut self.ranges, self.queries.len());
 	}
@@ -238,42 +245,50 @@ impl<'a> Worker<'a> {
 		self.candidates.get(self.ranges.get(end)?.clone())
 	}
 
-	fn generate(&mut self) {
-		self.repeats.clear();
-		for end in 0..self.queries.len() {
-			let Some(&query) = self.queries.get(end) else {
-				break;
-			};
-			if self.done.get(end).copied().unwrap_or(false) {
-				self.repeats.push(0.0);
-				continue;
-			}
-			let codes = std::mem::take(&mut self.codes);
-			let packed = std::mem::take(&mut self.packed);
-			let start = query.start;
-			let forward = codes.get(start..start + query.length).unwrap_or_default();
-			let reverse = codes
-				.get(start + query.length..start + 2 * query.length)
-				.unwrap_or_default();
-			let mapped = self.mapper.chains(forward, &mut self.chains);
-			self.repeats.push(mapped.repeat_fraction);
-			let best = self.chains.first().map_or(0.0, |chain| chain.score);
-			let chains = std::mem::take(&mut self.chains);
-			for chain in chains
-				.iter()
-				.take(MAX_EXTENSIONS)
-				.filter(|chain| chain.score >= EXTEND_FRACTION * best)
-			{
-				let (codes_for, packed_for) = match chain.strand {
-					Strand::Forward => (forward, packed_slice(&packed, query, Strand::Forward)),
-					Strand::Reverse => (reverse, packed_slice(&packed, query, Strand::Reverse)),
-				};
-				self.place_chain(u32_of(end), chain, codes_for, packed_for, query.clean);
-			}
-			self.chains = chains;
-			self.codes = codes;
-			self.packed = packed;
+	fn extract(&mut self, end: usize) {
+		let Some(&query) = self.queries.get(end) else {
+			return;
+		};
+		let forward = self
+			.codes
+			.get(query.start..query.start + query.length)
+			.unwrap_or_default();
+		self.mapper.extract(end % 2, forward);
+	}
+
+	fn generate(&mut self, end: usize) {
+		let Some(&query) = self.queries.get(end) else {
+			return;
+		};
+		if self.done.get(end).copied().unwrap_or(false) {
+			self.repeats.push(0.0);
+			return;
 		}
+		let codes = std::mem::take(&mut self.codes);
+		let packed = std::mem::take(&mut self.packed);
+		let start = query.start;
+		let forward = codes.get(start..start + query.length).unwrap_or_default();
+		let reverse = codes
+			.get(start + query.length..start + 2 * query.length)
+			.unwrap_or_default();
+		let mapped = self.mapper.chains(end % 2, &mut self.chains);
+		self.repeats.push(mapped.repeat_fraction);
+		let best = self.chains.first().map_or(0.0, |chain| chain.score);
+		let chains = std::mem::take(&mut self.chains);
+		for chain in chains
+			.iter()
+			.take(MAX_EXTENSIONS)
+			.filter(|chain| chain.score >= EXTEND_FRACTION * best)
+		{
+			let (codes_for, packed_for) = match chain.strand {
+				Strand::Forward => (forward, packed_slice(&packed, query, Strand::Forward)),
+				Strand::Reverse => (reverse, packed_slice(&packed, query, Strand::Reverse)),
+			};
+			self.place_chain(u32_of(end), chain, codes_for, packed_for, query.clean);
+		}
+		self.chains = chains;
+		self.codes = codes;
+		self.packed = packed;
 	}
 
 	fn place_unique(&mut self, end: usize) -> Option<Placed> {
@@ -281,8 +296,7 @@ impl<'a> Worker<'a> {
 		if !query.clean || query.length < MIN_FAST_LENGTH {
 			return None;
 		}
-		let forward = self.codes.get(query.start..query.start + query.length)?;
-		self.mapper.locate(forward, &mut self.diagonals);
+		self.mapper.locate(end % 2, &mut self.diagonals);
 		let reference = self.index.reference();
 		for diagonal in self.diagonals.iter().take(FAST_DIAGONALS) {
 			let Ok(start) = u64::try_from(diagonal.start) else {
