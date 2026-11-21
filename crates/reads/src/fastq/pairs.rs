@@ -104,6 +104,13 @@ pub fn interleaved_pairs(batch: &FastqBatch) -> impl Iterator<Item = ReadPair<'_
 	})
 }
 
+pub fn interleaved(batch: &FastqBatch) -> bool {
+	match (batch.get(0), batch.get(1)) {
+		(Some(first), Some(second)) => mate_stem(first.name) == mate_stem(second.name),
+		_ => false,
+	}
+}
+
 fn check_names<'a>(
 	pairs: impl Iterator<Item = ReadPair<'a>>,
 	already_read: u64,

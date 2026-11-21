@@ -48,6 +48,12 @@ impl Store {
 			.join(format!("{}.fa", build.name()))
 	}
 
+	pub fn aligner_index_path(&self, build: Build) -> PathBuf {
+		self.root
+			.join("indexes")
+			.join(format!("{}.synapton", build.name()))
+	}
+
 	pub fn reference(&self, build: Build) -> Option<PathBuf> {
 		let path = self.reference_path(build);
 		let index = path.with_extension("fa.fai");

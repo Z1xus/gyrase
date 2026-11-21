@@ -46,6 +46,10 @@ pub enum Error {
 	Variants(#[from] gyrase_variants::Error),
 	#[error(transparent)]
 	Extract(#[from] gyrase_extract::Error),
+	#[error(transparent)]
+	Align(#[from] synapton::Error),
+	#[error("a worker thread stopped unexpectedly")]
+	Worker,
 	#[error("cancelled")]
 	Cancelled,
 }

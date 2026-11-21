@@ -1,5 +1,5 @@
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -10,12 +10,13 @@ use gyrase_extract::{
 use gyrase_genome::{Build, Reference};
 use gyrase_io::Workers;
 
+use crate::align::{self, Alignment};
 use crate::alignments::{header, indexed};
 use crate::bam::{coordinate_sorted, index, sort, sort_budget};
 use crate::partial::Partial;
 use crate::{
-	Alignments, Calling, Cancel, Error, Estimate, Input, Kind, Progress, Resources, Sample, Source,
-	Stage, Store, Targets, Vcf, shards,
+	Alignments, Calling, Cancel, Error, Estimate, Input, Kind, Lane, Progress, Resources, Sample,
+	Source, Stage, Store, Targets, Vcf, shards,
 };
 
 const IO_THREADS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(1);
@@ -57,30 +58,38 @@ struct Pools {
 
 impl Plan {
 	pub fn new(sample: Sample, store: &Store, request: &Request) -> Result<Self, Error> {
-		let io = Workers::new(IO_THREADS)?;
-		let Source::Alignments(input) = &sample.source else {
-			return Err(Error::NotAlignments(sample.path().to_owned()));
+		let file = |suffix: &str| request.output.join(format!("{}.{suffix}", sample.name));
+		let (build, steps, alignments) = match &sample.source {
+			Source::Alignments(input) => {
+				let header = header(input, None, &Workers::new(IO_THREADS)?)?;
+				let build = Build::detect(&header.contigs()?).unwrap_or(DEFAULT_BUILD);
+				match (indexed(input), input.kind, coordinate_sorted(&header)) {
+					(true, _, _) => (build, Vec::new(), None),
+					(false, Kind::Bam, true) => (build, vec![Stage::Index], None),
+					(false, Kind::Bam, false) => {
+						(build, vec![Stage::Sort], Some(file("sorted.bam")))
+					}
+					(false, _, _) => return Err(Error::MissingIndex(input.path.clone())),
+				}
+			}
+			Source::Reads(_) => (
+				DEFAULT_BUILD,
+				vec![Stage::Align, Stage::Sort],
+				Some(file("bam")),
+			),
+			Source::Variants(_) | Source::Reference(_) => {
+				return Err(Error::NotAlignments(sample.path().to_owned()));
+			}
 		};
-		let header = header(input, None, &io)?;
-		let build = Build::detect(&header.contigs()?).unwrap_or(DEFAULT_BUILD);
 		let exported = CallBuild::try_from(build).is_ok();
+		let aligned = matches!(sample.source, Source::Reads(_));
 		let mut stages = Vec::new();
-		if store.reference(build).is_none() {
+		if store.reference(build).is_none()
+			|| (aligned && !store.aligner_index_path(build).is_file())
+		{
 			stages.push(Stage::Reference);
 		}
-		let file = |suffix: &str| request.output.join(format!("{}.{suffix}", sample.name));
-		let mut alignments = None;
-		if !indexed(input) {
-			if input.kind != Kind::Bam {
-				return Err(Error::MissingIndex(input.path.clone()));
-			}
-			if coordinate_sorted(&header) {
-				stages.push(Stage::Index);
-			} else {
-				stages.push(Stage::Sort);
-				alignments = Some(file("sorted.bam"));
-			}
-		}
+		stages.extend(steps);
 		stages.push(Stage::Call);
 		if exported && !request.formats.is_empty() {
 			stages.push(Stage::Export);
@@ -115,34 +124,42 @@ impl Plan {
 		cancel: &Cancel,
 		mut report: impl FnMut(Progress),
 	) -> Result<Report, Error> {
-		let Source::Alignments(input) = &self.sample.source else {
-			return Err(Error::NotAlignments(self.sample.path().to_owned()));
-		};
 		let pools = Pools::new(resources)?;
 		let reference = Arc::new(Reference::open(&self.reference(
 			store,
 			cancel,
 			&mut report,
 		)?)?);
-		let sorted;
-		let input = match &self.outputs.alignments {
-			Some(path) => {
-				sort(
-					input,
+		let prepared;
+		let input = match (&self.sample.source, &self.outputs.alignments) {
+			(Source::Alignments(input), None) => {
+				if self.stages.contains(&Stage::Index) {
+					index(input, &pools.compute, cancel, &mut report)?;
+				}
+				input
+			}
+			(Source::Alignments(input), Some(path)) => {
+				let budget = sort_budget(resources.memory);
+				sort(input, path, budget, &pools.compute, cancel, &mut report)?;
+				prepared = Input::open(path)?;
+				&prepared
+			}
+			(Source::Reads(lanes), Some(path)) => {
+				self.align(
+					lanes,
 					path,
-					sort_budget(resources.memory),
-					&pools.compute,
+					&reference,
+					store,
+					resources,
+					&pools,
 					cancel,
 					&mut report,
 				)?;
-				sorted = Input::open(path)?;
-				&sorted
+				prepared = Input::open(path)?;
+				&prepared
 			}
-			None => input,
+			_ => return Err(Error::NotAlignments(self.sample.path().to_owned())),
 		};
-		if self.stages.contains(&Stage::Index) {
-			index(input, &pools.compute, cancel, &mut report)?;
-		}
 		let alignments = Alignments::open(input, reference, &pools.io)?;
 		let call_build = CallBuild::try_from(self.build).ok();
 		let panel = Panel::embedded(&pools.io)?;
@@ -198,6 +215,48 @@ impl Plan {
 			variants,
 			raw,
 		})
+	}
+
+	#[allow(clippy::too_many_arguments)]
+	fn align(
+		&self,
+		lanes: &[Lane],
+		path: &Path,
+		reference: &Reference,
+		store: &Store,
+		resources: &Resources,
+		pools: &Pools,
+		cancel: &Cancel,
+		report: &mut impl FnMut(Progress),
+	) -> Result<(), Error> {
+		let preparing = self.stages.contains(&Stage::Reference);
+		let mut estimate = Estimate::new(Stage::Reference, 1, Instant::now());
+		if preparing {
+			report(estimate.progress());
+		}
+		let index = align::index(
+			reference,
+			&store.aligner_index_path(self.build),
+			&pools.compute,
+		)?;
+		if preparing {
+			report(estimate.advance(1, Instant::now()));
+		}
+		let resident = u64::try_from(index.heap_bytes()).unwrap_or(u64::MAX);
+		Alignment {
+			index: &index,
+			compute: &pools.compute,
+			io: &pools.io,
+			cancel,
+		}
+		.run(
+			lanes,
+			&self.sample.name,
+			path,
+			sort_budget(resources.memory.saturating_sub(resident)),
+			report,
+		)?;
+		Ok(())
 	}
 
 	fn reference(

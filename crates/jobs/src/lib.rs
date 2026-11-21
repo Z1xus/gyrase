@@ -1,3 +1,4 @@
+mod align;
 mod alignments;
 mod bam;
 mod calling;

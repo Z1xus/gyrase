@@ -18,6 +18,7 @@ gyrase-reads.workspace = true
 gyrase-variants.workspace = true
 flate2.workspace = true
 rayon.workspace = true
+synapton.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
 ureq.workspace = true

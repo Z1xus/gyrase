@@ -20,7 +20,7 @@ pub use error::{
 };
 pub use fastq::{
 	FastqBatch, FastqReader, InterleavedFastq, PairedBatch, PairedFastq, ReadPair, ReadRef,
-	interleaved_pairs,
+	interleaved, interleaved_pairs,
 };
 pub use header::{Field, Fields, Header, Line, Reference, SortOrder};
 pub use markdup::{MarkSettings, MarkStats};
