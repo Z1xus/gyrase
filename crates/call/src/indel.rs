@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 
 use gyrase_pileup::{Change, Indel, Pileup, Window};
@@ -231,14 +232,13 @@ pub(crate) fn from_text<'a>(reference: &[u8], alternate: &'a [u8]) -> Option<All
 }
 
 fn distinct<'a>(pileup: &Pileup<'a>, group: &'a [Indel]) -> impl Iterator<Item = Allele<'a>> {
-	let mut seen: Vec<NonZeroU32> = Vec::new();
+	let mut seen: HashSet<NonZeroU32> = HashSet::new();
 	let pileup = *pileup;
 	group.iter().filter_map(move |indel| {
-		if let Some(fragment) = indel.fragment {
-			if seen.contains(&fragment) {
-				return None;
-			}
-			seen.push(fragment);
+		if let Some(fragment) = indel.fragment
+			&& !seen.insert(fragment)
+		{
+			return None;
 		}
 		Some(allele(&pileup, indel))
 	})

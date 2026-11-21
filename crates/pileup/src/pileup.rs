@@ -15,6 +15,7 @@ const FNV_PRIME: u32 = 0x0100_0193;
 const FREE_MISMATCHES: usize = 1;
 const COUNTED_MISMATCH_QUALITY: u8 = 20;
 const MAX_MAPPING_QUALITY: u8 = 60;
+const MAX_FRAGMENT: u64 = 1_000;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Window<'a> {
@@ -326,10 +327,11 @@ impl Scratch {
 			match operation.kind() {
 				CigarKind::SoftClip if query == 0 => {
 					leading_clip = operation.len().into();
+					let placed = leading_clip.min(reference);
 					self.segments.push(Segment {
-						reference: reference.saturating_sub(leading_clip),
-						query,
-						len,
+						reference: reference - placed,
+						query: len - usize::try_from(placed).unwrap_or(len),
+						len: usize::try_from(placed).unwrap_or(len),
 					});
 				}
 				CigarKind::Match
@@ -622,7 +624,7 @@ fn overlaps_mate(record: &RecordRef<'_>, start: u64, end: u64) -> bool {
 		&& !flags.is_mate_unmapped()
 		&& record.mate_contig() == record.contig()
 		&& mate_start < end
-		&& start < mate_start + (end - start)
+		&& start < mate_start + MAX_FRAGMENT
 }
 
 fn fragment_id(name: &[u8]) -> NonZeroU32 {

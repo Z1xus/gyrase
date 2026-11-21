@@ -86,8 +86,14 @@ pub(crate) fn realign(
 		.map(|edit| edit.deleted)
 		.max()
 		.unwrap_or(0);
+	let longest_insertion = alternates
+		.iter()
+		.chain(competitors)
+		.map(|edit| u64::try_from(edit.inserted.len()).unwrap_or(u64::MAX))
+		.max()
+		.unwrap_or(0);
 	let begin = from.saturating_sub(PAD).max(pileup.window.start);
-	let end = to + PAD + longest_deletion;
+	let end = to + PAD + longest_deletion + longest_insertion;
 	let reference = Haplotype::new(pileup, begin, end, Vec::new());
 	let competitors: Vec<Edit<'_>> = competitors
 		.iter()

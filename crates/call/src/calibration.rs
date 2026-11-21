@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use gyrase_pileup::{Pileup, Window};
 
 const MAX_PERIOD: usize = 6;
@@ -109,10 +111,16 @@ impl Calibration {
 				.iter()
 				.filter(|observation| observation.flank >= required)
 				.count() as u64;
+			let mut fragments = HashSet::new();
 			let events = pileup
 				.indels_at(column.position)
 				.iter()
 				.filter(|indel| indel.flank >= required)
+				.filter(|indel| {
+					indel
+						.fragment
+						.is_none_or(|fragment| fragments.insert(fragment))
+				})
 				.count() as u64;
 			if depth == 0 {
 				continue;

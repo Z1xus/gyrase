@@ -285,12 +285,20 @@ impl Caller {
 		candidates: &[Candidate<'a>],
 		site: &'a Site,
 	) -> Option<Call> {
-		let alternates: Vec<Allele<'a>> = site
+		let offset = usize::try_from(site.position.checked_sub(pileup.window.start)?).ok()?;
+		let expected = pileup
+			.window
+			.bases
+			.get(offset..offset.checked_add(site.reference.len())?)?;
+		if !expected.eq_ignore_ascii_case(&site.reference) {
+			return None;
+		}
+		let mut alternates: Vec<Allele<'a>> = site
 			.alternates
 			.iter()
-			.filter_map(|alternate| indel::from_text(&site.reference, alternate))
-			.take(MAX_ALLELES - 1)
-			.collect();
+			.map(|alternate| indel::from_text(&site.reference, alternate))
+			.collect::<Option<_>>()?;
+		alternates.truncate(MAX_ALLELES - 1);
 		if alternates.is_empty() {
 			return None;
 		}

@@ -95,9 +95,13 @@ impl Likelihoods {
 			.map(|value| (value - peak).exp())
 			.sum();
 		let probability = |index: usize| (posterior[index] - peak).exp() / total;
-		let best = (0..count)
-			.max_by(|&left, &right| posterior[left].total_cmp(&posterior[right]))
-			.unwrap_or(0);
+		let best = (0..count).fold(0, |best, index| {
+			if posterior[index] > posterior[best] {
+				index
+			} else {
+				best
+			}
+		});
 		let reference = probability(0);
 		let wrong = (1.0 - probability(best)).max(0.0);
 		Posterior {
