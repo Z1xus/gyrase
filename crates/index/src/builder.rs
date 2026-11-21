@@ -260,10 +260,11 @@ impl Builder {
 				end: interval.end,
 			});
 		}
+		let end = interval.end.max(interval.start.saturating_add(1));
 		let limit = self.geometry.max_position();
-		if interval.end > limit {
+		if end > limit {
 			return Err(Error::PositionOutOfRange {
-				position: interval.end,
+				position: end,
 				limit,
 			});
 		}
@@ -273,7 +274,7 @@ impl Builder {
 				limit: MAX_REFERENCES,
 			});
 		}
-		Ok(interval.end.max(1))
+		Ok(end)
 	}
 
 	fn complete(&mut self, run: Run, closing: VirtualOffset) -> Result<(), Error> {
