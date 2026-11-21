@@ -11,15 +11,19 @@ export component DoneView inherits VerticalLayout {
 
     spacing: Metrics.section;
 
-    HorizontalLayout {
-        spacing: 12px;
-        height: 72px;
+    VerticalLayout {
+        vertical-stretch: 1;
+        alignment: center;
+        spacing: Metrics.pad;
 
-        Icon {
-            source: Icons.done;
-            size: 32px;
-            tint: Gel.accent;
-            y: (parent.height - self.height) / 2;
+        HorizontalLayout {
+            alignment: center;
+
+            Icon {
+                source: Icons.done;
+                size: 64px;
+                tint: Gel.accent;
+            }
         }
 
         Text {
@@ -27,7 +31,7 @@ export component DoneView inherits VerticalLayout {
             font-size: 20px;
             font-weight: 600;
             color: Gel.ink;
-            vertical-alignment: center;
+            horizontal-alignment: center;
         }
     }
 
@@ -70,8 +74,6 @@ export component DoneView inherits VerticalLayout {
     }
 
     VerticalLayout {
-        vertical-stretch: 1;
-        alignment: end;
         spacing: Metrics.pad;
 
         if root.error != "": ErrorLine {
