@@ -15,6 +15,7 @@ const SUBSTITUTION_BASES: [u8; 5] = *b"ACGTN";
 const NO_READ_GROUP: i32 = -1;
 const NO_MATE: i32 = -1;
 const PSEUDO_TAG: [u8; 2] = *b"cF";
+const LONG_CIGAR_TAG: [u8; 2] = *b"CG";
 
 fn one_based(position: u64) -> Result<i32, Error> {
 	i32::try_from(position)
@@ -199,7 +200,7 @@ impl<'a> RecordEncoder<'a> {
 		}
 		let start = u64::try_from(position - 1).map_err(|_| Error::IntegerOverflow)?;
 		regenerate::describe(
-			window,
+			&mut |position, target| window.copy(position, target),
 			start,
 			cigar.ops().map(CigarOp::raw),
 			&self.bases,
@@ -251,8 +252,12 @@ impl<'a> RecordEncoder<'a> {
 		self.tag_bytes.clear();
 		let mut group = NO_READ_GROUP;
 		let (mut md_present, mut nm_present) = (false, false);
+		let long_cigar = record.has_long_cigar();
 		for field in &record.tags() {
 			let field = field?;
+			if long_cigar && field.tag == LONG_CIGAR_TAG {
+				continue;
+			}
 			match (field.tag, field.value) {
 				(name, Value::String(id)) if name == *b"RG" && group == NO_READ_GROUP => {
 					if let Some(index) = self.read_group(id) {

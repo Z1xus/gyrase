@@ -2,7 +2,6 @@ use std::io::Write;
 
 use crate::cram::Error;
 use crate::cram::decode::advance;
-use crate::cram::reference::Window;
 
 const CHUNK: usize = 1 << 16;
 
@@ -11,7 +10,7 @@ fn malformed() -> Error {
 }
 
 pub(crate) fn describe(
-	window: &Window,
+	source: &mut impl FnMut(u64, &mut [u8]) -> Result<(), Error>,
 	start: u64,
 	operations: impl IntoIterator<Item = u32>,
 	bases: &[u8],
@@ -31,7 +30,7 @@ pub(crate) fn describe(
 				while done < length {
 					let step = (length - done).min(CHUNK);
 					reference_bases.resize(step, 0);
-					window.copy(reference, reference_bases)?;
+					source(reference, reference_bases)?;
 					let aligned = bases.get(read..read + step).ok_or_else(malformed)?;
 					for (base, expected) in aligned.iter().zip(reference_bases.iter()) {
 						if *base == b'='
@@ -60,7 +59,7 @@ pub(crate) fn describe(
 				while done < length {
 					let step = (length - done).min(CHUNK);
 					reference_bases.resize(step, 0);
-					window.copy(reference, reference_bases)?;
+					source(reference, reference_bases)?;
 					md.extend_from_slice(reference_bases);
 					reference = advance(reference, step)?;
 					done += step;

@@ -19,7 +19,7 @@ impl Span {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct Rec {
+pub(crate) struct Record {
 	pub(crate) flags: u16,
 	pub(crate) cram_flags: u32,
 	pub(crate) reference: i32,
@@ -42,8 +42,8 @@ pub(crate) struct Rec {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct Records {
-	pub(crate) recs: Vec<Rec>,
+pub(crate) struct RecordTable {
+	pub(crate) records: Vec<Record>,
 	pub(crate) names: Vec<u8>,
 	pub(crate) cigars: Vec<u32>,
 	pub(crate) bases: Vec<u8>,

@@ -104,10 +104,13 @@ fn multi_extents(
 	slice_index: usize,
 ) -> Result<Vec<(i32, i32, i32)>, Error> {
 	source.seek(SeekFrom::Start(body))?;
-	let mut bytes = Vec::with_capacity(container.length);
+	let mut bytes = Vec::new();
 	source
 		.take(container.length as u64)
 		.read_to_end(&mut bytes)?;
+	if bytes.len() != container.length {
+		return Err(Error::Truncated);
+	}
 	let parsed = slice::parse(container, &bytes)?;
 	let blocks = parsed
 		.slices

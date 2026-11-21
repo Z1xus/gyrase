@@ -9,7 +9,7 @@ use crate::cram::encoding::{Data, Encoding};
 use crate::cram::records::{
 	CF_DETACHED, CF_EXPLICIT_LENGTH, CF_MATE_DOWNSTREAM, CF_NO_SEQUENCE, CF_QUALITIES,
 	CIGAR_DELETION, CIGAR_HARD_CLIP, CIGAR_INSERTION, CIGAR_MATCH, CIGAR_PADDING, CIGAR_SKIP,
-	CIGAR_SOFT_CLIP, FLAG_REVERSE, FLAG_UNMAPPED, Rec, Records, Span,
+	CIGAR_SOFT_CLIP, FLAG_REVERSE, FLAG_UNMAPPED, Record, RecordTable, Span,
 };
 use crate::cram::reference::{References, Window};
 use crate::cram::regenerate;
@@ -176,8 +176,8 @@ pub(crate) fn decode_slice(
 	header: &CompressionHeader,
 	blocks: &SliceBlocks<'_>,
 ) -> Result<Decoded, Error> {
-	let records = decode_records(environment, header, blocks)?;
-	emit::finish(records, environment, blocks.header.record_counter)
+	let table = decode_records(environment, header, blocks)?;
+	emit::finish(table, environment, blocks.header.record_counter)
 }
 
 pub(crate) fn decode_extents(
@@ -185,11 +185,11 @@ pub(crate) fn decode_extents(
 	header: &CompressionHeader,
 	blocks: &SliceBlocks<'_>,
 ) -> Result<Vec<(i32, i32, i32)>, Error> {
-	let records = decode_records(environment, header, blocks)?;
-	Ok(records
-		.recs
+	let table = decode_records(environment, header, blocks)?;
+	Ok(table
+		.records
 		.iter()
-		.map(|rec| (rec.reference, rec.position, rec.end))
+		.map(|record| (record.reference, record.position, record.end))
 		.collect())
 }
 
@@ -197,9 +197,9 @@ fn decode_records(
 	environment: &Environment,
 	header: &CompressionHeader,
 	blocks: &SliceBlocks<'_>,
-) -> Result<Records, Error> {
+) -> Result<RecordTable, Error> {
 	let slice = &blocks.header;
-	let records = usize::try_from(slice.records)
+	let count = usize::try_from(slice.records)
 		.ok()
 		.filter(|count| *count <= MAX_RECORDS)
 		.ok_or(Error::TooLarge {
@@ -215,7 +215,7 @@ fn decode_records(
 		window_reference: slice.reference,
 		window,
 		last_position: slice.start,
-		out: Records::default(),
+		out: RecordTable::default(),
 		bases: Vec::new(),
 		qualities: Vec::new(),
 		array: Vec::new(),
@@ -223,8 +223,8 @@ fn decode_records(
 		md: Vec::new(),
 		length_budget: 0,
 	};
-	decoder.out.recs.reserve(records.min(FIRST_RESERVE));
-	for _ in 0..records {
+	decoder.out.records.reserve(count.min(FIRST_RESERVE));
+	for _ in 0..count {
 		decoder.record()?;
 	}
 	Ok(decoder.out)
@@ -238,7 +238,7 @@ struct Decoder<'a> {
 	window: Option<Window>,
 	window_reference: i32,
 	last_position: i32,
-	out: Records,
+	out: RecordTable,
 	bases: Vec<u8>,
 	qualities: Vec<u8>,
 	array: Vec<u8>,
@@ -251,8 +251,8 @@ impl Decoder<'_> {
 	fn record(&mut self) -> Result<(), Error> {
 		let header = self.header;
 		let series = &header.series;
-		let index = self.out.recs.len();
-		let mut rec = Rec {
+		let index = self.out.records.len();
+		let mut record = Record {
 			flags: match optional(&series.flags, &mut self.data)? {
 				Some(flags) => u16::try_from(flags).map_err(|_| malformed())?,
 				None => FLAG_UNMAPPED,
@@ -261,47 +261,47 @@ impl Decoder<'_> {
 				Some(flags) => u32::try_from(flags).map_err(|_| malformed())?,
 				None => 0,
 			},
-			..Rec::default()
+			..Record::default()
 		};
-		rec.reference = if self.slice.reference == -2 {
+		record.reference = if self.slice.reference == -2 {
 			optional(&series.reference_id, &mut self.data)?.unwrap_or(-1)
 		} else {
 			self.slice.reference
 		};
-		self.select_window(rec.reference)?;
+		self.select_window(record.reference)?;
 		if let Some(length) = optional(&series.read_length, &mut self.data)? {
-			rec.length = natural(length)?;
-			self.length_budget = self.length_budget.saturating_add(rec.length);
+			record.length = natural(length)?;
+			self.length_budget = self.length_budget.saturating_add(record.length);
 			if self.length_budget > MAX_BASES {
 				return Err(Error::TooLarge {
 					len: self.length_budget as u64,
 				});
 			}
 		}
-		rec.position = self.position()?;
-		rec.read_group = self.read_group()?;
+		record.position = self.position()?;
+		record.read_group = self.read_group()?;
 		if header.read_names == ReadNames::Stored {
-			rec.name = self.name()?;
+			record.name = self.name()?;
 		}
-		self.mate(&mut rec, index)?;
-		let flags = self.tags(&mut rec)?;
+		self.mate(&mut record, index)?;
+		let flags = self.tags(&mut record)?;
 		let side = self.out.names.len().max(self.out.tags.len());
 		if side > MAX_BASES {
 			return Err(Error::TooLarge { len: side as u64 });
 		}
-		if rec.flags & FLAG_UNMAPPED == 0 {
-			self.mapped(&mut rec, flags)?;
+		if record.flags & FLAG_UNMAPPED == 0 {
+			self.mapped(&mut record, flags)?;
 		} else {
-			self.unmapped(&mut rec)?;
+			self.unmapped(&mut record)?;
 		}
 		if header.qualities == Qualities::Aligned
 			&& !series.quality.is_null()
-			&& rec.flags & FLAG_REVERSE != 0
+			&& record.flags & FLAG_REVERSE != 0
 		{
 			self.qualities.reverse();
 		}
-		self.store(&mut rec)?;
-		self.out.recs.push(rec);
+		self.store(&mut record)?;
+		self.out.records.push(record);
 		Ok(())
 	}
 
@@ -322,24 +322,15 @@ impl Decoder<'_> {
 	}
 
 	fn cover(&mut self, position: u64, count: usize) -> Result<(), Error> {
-		if self.slice.reference != -2
-			|| self.window_reference < 0
-			|| self.header.bases == Bases::Explicit
-		{
-			return Ok(());
-		}
-		let end = advance(position, count.max(1))?;
-		if self
-			.window
-			.as_ref()
-			.is_some_and(|window| window.covers(position, end))
-		{
-			return Ok(());
-		}
-		let index = natural(self.window_reference)?;
-		let to = end.max(advance(position, WINDOW_CHUNK)?);
-		self.window = Some(self.environment.references.window(index, position, to)?);
-		Ok(())
+		cover(
+			self.environment,
+			self.header,
+			self.slice,
+			self.window_reference,
+			&mut self.window,
+			position,
+			count,
+		)
 	}
 
 	fn position(&mut self) -> Result<i32, Error> {
@@ -396,38 +387,39 @@ impl Decoder<'_> {
 		Ok(reference)
 	}
 
-	fn mate(&mut self, rec: &mut Rec, index: usize) -> Result<(), Error> {
+	fn mate(&mut self, record: &mut Record, index: usize) -> Result<(), Error> {
 		let series = &self.header.series;
-		rec.mate_reference = -1;
-		if rec.cram_flags & CF_DETACHED != 0 {
-			rec.mate_flags = match optional(&series.mate_flags, &mut self.data)? {
+		record.mate_reference = -1;
+		if record.cram_flags & CF_DETACHED != 0 {
+			record.mate_flags = match optional(&series.mate_flags, &mut self.data)? {
 				Some(flags) => u8::try_from(flags).map_err(|_| malformed())?,
 				None => 0,
 			};
 			if self.header.read_names == ReadNames::Generated {
-				rec.name = self.name()?;
+				record.name = self.name()?;
 			}
-			rec.mate_reference = self.mate_reference()?;
-			rec.mate_position = optional(&series.mate_position, &mut self.data)?.unwrap_or(0);
-			rec.template_length = optional(&series.template_length, &mut self.data)?;
-		} else if rec.cram_flags & CF_MATE_DOWNSTREAM != 0 {
+			record.mate_reference = self.mate_reference()?;
+			record.mate_position = optional(&series.mate_position, &mut self.data)?.unwrap_or(0);
+			record.template_length = optional(&series.template_length, &mut self.data)?;
+		} else if record.cram_flags & CF_MATE_DOWNSTREAM != 0 {
 			if let Some(distance) = optional(&series.next_fragment, &mut self.data)? {
 				let mate = index
 					.checked_add(natural(distance)?)
 					.and_then(|mate| mate.checked_add(1))
 					.ok_or(Error::IntegerOverflow)?;
-				rec.mate_line = Some(mate);
+				record.mate_line = Some(mate);
 			}
-			if rec.cram_flags & CF_EXPLICIT_LENGTH != 0 {
-				rec.explicit_template_length = optional(&series.template_length, &mut self.data)?;
+			if record.cram_flags & CF_EXPLICIT_LENGTH != 0 {
+				record.explicit_template_length =
+					optional(&series.template_length, &mut self.data)?;
 			}
-		} else if rec.cram_flags & CF_EXPLICIT_LENGTH != 0 {
-			rec.explicit_template_length = optional(&series.template_length, &mut self.data)?;
+		} else if record.cram_flags & CF_EXPLICIT_LENGTH != 0 {
+			record.explicit_template_length = optional(&series.template_length, &mut self.data)?;
 		}
 		Ok(())
 	}
 
-	fn tags(&mut self, rec: &mut Rec) -> Result<TagFlags, Error> {
+	fn tags(&mut self, record: &mut Record) -> Result<TagFlags, Error> {
 		let header = self.header;
 		let start = self.out.tags.len();
 		let mut flags = TagFlags::default();
@@ -460,47 +452,47 @@ impl Decoder<'_> {
 				}
 			}
 		}
-		rec.tags = Span::since(start, self.out.tags.len());
+		record.tags = Span::since(start, self.out.tags.len());
 		Ok(flags)
 	}
 
-	fn unmapped(&mut self, rec: &mut Rec) -> Result<(), Error> {
+	fn unmapped(&mut self, record: &mut Record) -> Result<(), Error> {
 		let series = &self.header.series;
-		rec.end = rec.position;
+		record.end = record.position;
 		self.bases.clear();
-		if rec.length > 0 && rec.cram_flags & CF_NO_SEQUENCE == 0 && !series.base.is_null() {
+		if record.length > 0 && record.cram_flags & CF_NO_SEQUENCE == 0 && !series.base.is_null() {
 			series
 				.base
-				.bytes(rec.length, &mut self.data, &mut self.bases)?;
+				.bytes(record.length, &mut self.data, &mut self.bases)?;
 		} else {
-			self.bases.resize(rec.length, b'=');
+			self.bases.resize(record.length, b'=');
 		}
 		self.qualities.clear();
-		if rec.cram_flags & CF_QUALITIES != 0 && !series.quality.is_null() {
+		if record.cram_flags & CF_QUALITIES != 0 && !series.quality.is_null() {
 			series
 				.quality
-				.bytes(rec.length, &mut self.data, &mut self.qualities)?;
+				.bytes(record.length, &mut self.data, &mut self.qualities)?;
 		} else {
-			self.qualities.resize(rec.length, MISSING_QUALITY);
+			self.qualities.resize(record.length, MISSING_QUALITY);
 		}
 		Ok(())
 	}
 
-	fn mapped(&mut self, rec: &mut Rec, flags: TagFlags) -> Result<(), Error> {
+	fn mapped(&mut self, record: &mut Record, flags: TagFlags) -> Result<(), Error> {
 		let header = self.header;
 		let series = &header.series;
-		if rec.position <= 0 {
+		if record.position <= 0 {
 			return Err(malformed());
 		}
-		let preserved = rec.cram_flags & CF_QUALITIES != 0;
+		let preserved = record.cram_flags & CF_QUALITIES != 0;
 		self.bases.clear();
-		self.bases.resize(rec.length, b'=');
+		self.bases.resize(record.length, b'=');
 		self.qualities.clear();
-		self.qualities.resize(rec.length, MISSING_QUALITY);
+		self.qualities.resize(record.length, MISSING_QUALITY);
 		let cigar_start = self.out.cigars.len();
 		let mut walk = Walk {
 			read: 0,
-			reference: u64::try_from(rec.position - 1).map_err(|_| malformed())?,
+			reference: u64::try_from(record.position - 1).map_err(|_| malformed())?,
 			builder: CigarBuilder::default(),
 		};
 		let count = natural(series.feature_count.int(&mut self.data)?)?;
@@ -513,11 +505,11 @@ impl Decoder<'_> {
 				.ok()
 				.filter(|position| *position > 0)
 				.ok_or_else(malformed)?;
-			if rec.length != 0 && position > rec.length {
+			if record.length != 0 && position > record.length {
 				let allowed = if matches!(code, b'N' | b'P' | b'H' | b'D') {
-					rec.length + 1
+					record.length + 1
 				} else {
-					rec.length
+					record.length
 				};
 				if position > allowed {
 					return Err(malformed());
@@ -531,16 +523,16 @@ impl Decoder<'_> {
 			self.matches(&mut walk, gap)?;
 			self.feature(code, index, preserved, &mut walk)?;
 		}
-		let tail = rec.length.saturating_sub(walk.read);
+		let tail = record.length.saturating_sub(walk.read);
 		self.matches(&mut walk, tail)?;
 		walk.builder.flush(&mut self.out.cigars)?;
-		rec.cigar = Span::since(cigar_start, self.out.cigars.len());
-		let span = reference_span(rec.cigar.of(&self.out.cigars));
-		let last = i64::from(rec.position)
+		record.cigar = Span::since(cigar_start, self.out.cigars.len());
+		let span = reference_span(record.cigar.of(&self.out.cigars));
+		let last = i64::from(record.position)
 			+ i64::try_from(span.max(1)).map_err(|_| Error::IntegerOverflow)?
 			- 1;
-		rec.end = i32::try_from(last).map_err(|_| Error::IntegerOverflow)?;
-		rec.mapq = match optional(&series.mapping_quality, &mut self.data)? {
+		record.end = i32::try_from(last).map_err(|_| Error::IntegerOverflow)?;
+		record.mapq = match optional(&series.mapping_quality, &mut self.data)? {
 			Some(mapq) => u8::try_from(mapq).map_err(|_| malformed())?,
 			None => DEFAULT_MAPPING_QUALITY,
 		};
@@ -548,10 +540,10 @@ impl Decoder<'_> {
 			self.qualities.clear();
 			series
 				.quality
-				.bytes(rec.length, &mut self.data, &mut self.qualities)?;
+				.bytes(record.length, &mut self.data, &mut self.qualities)?;
 		}
-		if rec.cram_flags & CF_NO_SEQUENCE == 0 && !(flags.md && flags.nm) {
-			self.regenerate(rec, flags)?;
+		if record.cram_flags & CF_NO_SEQUENCE == 0 && !(flags.md && flags.nm) {
+			self.regenerate(record, flags)?;
 		}
 		Ok(())
 	}
@@ -727,29 +719,57 @@ impl Decoder<'_> {
 		Ok(())
 	}
 
-	fn regenerate(&mut self, rec: &mut Rec, flags: TagFlags) -> Result<(), Error> {
-		if rec.reference < 0 || rec.cigar.is_empty() {
+	fn regenerate(&mut self, record: &mut Record, flags: TagFlags) -> Result<(), Error> {
+		if record.reference < 0 || record.cigar.is_empty() {
 			return Ok(());
 		}
-		let start = u64::try_from(rec.position - 1).map_err(|_| malformed())?;
-		let span = usize::try_from(reference_span(rec.cigar.of(&self.out.cigars)))
-			.map_err(|_| Error::IntegerOverflow)?;
-		self.cover(start, span)?;
-		let Some(window) = &self.window else {
+		let reference_available = self.window.is_some()
+			|| (self.slice.reference == -2
+				&& self.window_reference >= 0
+				&& self.header.bases != Bases::Explicit);
+		if !reference_available {
 			return Ok(());
+		}
+		let start = u64::try_from(record.position - 1).map_err(|_| malformed())?;
+		let Self {
+			environment,
+			header,
+			slice,
+			window,
+			window_reference,
+			bases,
+			md,
+			reference_bases,
+			out,
+			..
+		} = self;
+		let mut source = |position: u64, target: &mut [u8]| -> Result<(), Error> {
+			cover(
+				environment,
+				header,
+				slice,
+				*window_reference,
+				window,
+				position,
+				target.len(),
+			)?;
+			match window {
+				Some(window) => window.copy(position, target),
+				None => Ok(()),
+			}
 		};
 		let distance = regenerate::describe(
-			window,
+			&mut source,
 			start,
-			rec.cigar.of(&self.out.cigars).iter().copied(),
-			&self.bases,
-			&mut self.md,
-			&mut self.reference_bases,
+			record.cigar.of(&out.cigars).iter().copied(),
+			bases,
+			md,
+			reference_bases,
 		)?;
-		let tags = &mut self.out.tags;
+		let tags = &mut out.tags;
 		if !flags.md {
 			tags.extend_from_slice(b"MDZ");
-			tags.extend_from_slice(&self.md);
+			tags.extend_from_slice(md);
 			tags.push(0);
 		}
 		if !flags.nm {
@@ -765,14 +785,14 @@ impl Decoder<'_> {
 				tags.extend_from_slice(&distance.to_le_bytes());
 			}
 		}
-		rec.tags.end = tags.len();
+		record.tags.end = tags.len();
 		Ok(())
 	}
 
-	fn store(&mut self, rec: &mut Rec) -> Result<(), Error> {
+	fn store(&mut self, record: &mut Record) -> Result<(), Error> {
 		let start = self.out.bases.len();
-		if rec.cram_flags & CF_NO_SEQUENCE != 0 {
-			rec.length = 0;
+		if record.cram_flags & CF_NO_SEQUENCE != 0 {
+			record.length = 0;
 		} else {
 			if start + self.bases.len() > MAX_BASES {
 				return Err(Error::TooLarge {
@@ -782,10 +802,35 @@ impl Decoder<'_> {
 			self.out.bases.extend_from_slice(&self.bases);
 			self.out.qualities.extend_from_slice(&self.qualities);
 		}
-		rec.bases = Span::since(start, self.out.bases.len());
-		rec.qualities = Span::since(start, self.out.qualities.len());
+		record.bases = Span::since(start, self.out.bases.len());
+		record.qualities = Span::since(start, self.out.qualities.len());
 		Ok(())
 	}
+}
+
+fn cover(
+	environment: &Environment,
+	header: &CompressionHeader,
+	slice: &SliceHeader,
+	reference: i32,
+	window: &mut Option<Window>,
+	position: u64,
+	count: usize,
+) -> Result<(), Error> {
+	if slice.reference != -2 || reference < 0 || header.bases == Bases::Explicit {
+		return Ok(());
+	}
+	let end = advance(position, count.max(1))?;
+	if window
+		.as_ref()
+		.is_some_and(|window| window.covers(position, end))
+	{
+		return Ok(());
+	}
+	let index = natural(reference)?;
+	let to = end.max(advance(position, WINDOW_CHUNK)?);
+	*window = Some(environment.references.window(index, position, to)?);
+	Ok(())
 }
 
 pub(crate) fn advance(position: u64, count: usize) -> Result<u64, Error> {
