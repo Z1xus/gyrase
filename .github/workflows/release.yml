@@ -74,6 +74,7 @@ jobs:
       - name: scan
         env:
           VT_API_KEY: ${{ secrets.VT_API_KEY }}
+        shell: bash
         run: |
           printf '\n### Virus scans\n\n' > scans.md
           badge=https://www.shieldcn.dev/badge
