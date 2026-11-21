@@ -1,6 +1,5 @@
 #![windows_subsystem = "windows"]
 
-mod chrome;
 mod dialogs;
 mod drops;
 mod labels;
@@ -39,9 +38,9 @@ fn main() -> Result<(), slint::PlatformError> {
 		.backend_name("winit".into())
 		.renderer_name("software".into())
 		.select()?;
+	slint::set_xdg_app_id("gyrase")?;
 	let app = App::new()?;
 	let session = Session::new(&app);
-	chrome::attach(&app);
 	drops::accept(&app, &session);
 	session.connect(&app);
 	session.update(|screen| screen);

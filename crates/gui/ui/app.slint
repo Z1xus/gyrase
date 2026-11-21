@@ -7,7 +7,6 @@ import { DoneView } from "done-view.slint";
 import { PickView } from "pick-view.slint";
 import { ReadyView } from "ready-view.slint";
 import { RunningView } from "running-view.slint";
-import { TitleBar } from "title-bar.slint";
 import { Chip, Step, StepKind, View, Written } from "types.slint";
 
 export { Chip, Step, StepKind, View, Written }
@@ -34,41 +33,20 @@ export component App inherits Window {
     callback cancel;
     callback open-folder;
     callback another-file;
-    callback drag-window(Point);
-    callback minimize-window;
-    callback close-window;
 
     title: "gyrase";
     icon: @image-url("../assets/gyrase.svg");
-    no-frame: true;
     background: Gel.canvas;
     default-font-family: "Geist";
     default-font-weight: 400;
     min-width: 440px;
     max-width: 440px;
-    min-height: 560px;
-    max-height: 560px;
-
-    TitleBar {
-        x: 1px;
-        y: 1px;
-        width: root.width - 2px;
-        drag(point) => {
-            root.drag-window(point);
-        }
-        minimize => {
-            root.minimize-window();
-        }
-        close => {
-            root.close-window();
-        }
-    }
+    min-height: 534px;
+    max-height: 534px;
 
     Rectangle {
-        x: 1px;
-        y: 45px;
-        width: root.width - 2px;
-        height: root.height - 46px;
+        y: 20px;
+        height: root.height - 20px;
 
         if root.view == View.pick: PickView {
             x: 20px;
@@ -138,10 +116,5 @@ export component App inherits Window {
                 root.another-file();
             }
         }
-    }
-
-    Rectangle {
-        border-width: 1px;
-        border-color: Gel.line;
     }
 }

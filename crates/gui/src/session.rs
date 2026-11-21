@@ -101,17 +101,6 @@ impl Session {
 			let session = self.clone();
 			move || session.update(Screen::cancel)
 		});
-		app.on_close_window({
-			let session = self.clone();
-			let app = app.as_weak();
-			move || {
-				if session.close() == CloseRequestResponse::HideWindow
-					&& let Some(app) = app.upgrade()
-				{
-					app.hide().ok();
-				}
-			}
-		});
 		app.window().on_close_requested({
 			let session = self.clone();
 			move || session.close()
