@@ -45,7 +45,7 @@ pub const fn step_kind(stage: Stage) -> StepKind {
 
 pub const fn step(stage: Stage) -> &'static str {
 	match stage {
-		Stage::Reference => "Download reference",
+		Stage::Reference => "Prepare reference",
 		Stage::Index => "Index file",
 		Stage::Align => "Align reads",
 		Stage::Sort => "Sort reads",
@@ -56,7 +56,7 @@ pub const fn step(stage: Stage) -> &'static str {
 
 pub const fn activity(stage: Stage) -> &'static str {
 	match stage {
-		Stage::Reference => "Downloading reference…",
+		Stage::Reference => "Preparing reference…",
 		Stage::Index => "Indexing…",
 		Stage::Align => "Aligning reads…",
 		Stage::Sort => "Sorting reads…",

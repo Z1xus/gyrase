@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 pub fn files() -> Option<Vec<PathBuf>> {
 	rfd::FileDialog::new()
-		.add_filter("BAM or CRAM", &["bam", "cram"])
+		.add_filter(
+			"DNA files",
+			&["fastq", "fq", "gz", "sam", "bam", "cram", "vcf", "bcf"],
+		)
 		.pick_files()
 }
 

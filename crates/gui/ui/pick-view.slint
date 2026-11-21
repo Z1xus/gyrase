@@ -32,7 +32,7 @@ export component PickView inherits VerticalLayout {
             }
 
             Text {
-                text: "Drop a file";
+                text: "Drop your files";
                 font-size: 20px;
                 font-weight: 600;
                 color: Gel.ink;
@@ -40,7 +40,7 @@ export component PickView inherits VerticalLayout {
             }
 
             Text {
-                text: "BAM or CRAM";
+                text: "FASTQ, BAM, CRAM or VCF";
                 font-size: 13px;
                 color: Gel.ink-muted;
                 horizontal-alignment: center;
@@ -49,7 +49,7 @@ export component PickView inherits VerticalLayout {
 
         Pressable {
             radius: 20px;
-            accessible-label: "Choose File";
+            accessible-label: "Choose Files";
             clicked => {
                 root.choose();
             }
@@ -61,7 +61,7 @@ export component PickView inherits VerticalLayout {
     }
 
     PrimaryButton {
-        text: "Choose File";
+        text: "Choose Files";
         clicked => {
             root.choose();
         }
