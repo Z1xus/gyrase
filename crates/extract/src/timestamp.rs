@@ -60,6 +60,35 @@ impl Timestamp {
 		}
 	}
 
+	pub fn from_unix(seconds: u64) -> Result<Self, Error> {
+		let days = i64::try_from(seconds / 86_400).map_err(|_| Error::InvalidTimestamp)?;
+		let within = seconds % 86_400;
+		let shifted = days + 719_468;
+		let era = shifted.div_euclid(146_097);
+		let day_of_era = shifted.rem_euclid(146_097);
+		let year_of_era =
+			(day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+		let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+		let month_index = (5 * day_of_year + 2) / 153;
+		let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+		let month = if month_index < 10 {
+			month_index + 3
+		} else {
+			month_index - 9
+		};
+		let year = era * 400 + year_of_era + i64::from(month <= 2);
+		let narrow = |value: i64| u8::try_from(value).map_err(|_| Error::InvalidTimestamp);
+		let clock = |value: u64| u8::try_from(value).map_err(|_| Error::InvalidTimestamp);
+		Self::new(
+			u16::try_from(year).map_err(|_| Error::InvalidTimestamp)?,
+			narrow(month)?,
+			narrow(day)?,
+			clock(within / 3_600)?,
+			clock(within / 60 % 60)?,
+			clock(within % 60)?,
+		)
+	}
+
 	fn weekday(self) -> &'static str {
 		let shifted_year = i64::from(self.year) - i64::from(self.month <= 2);
 		let era = shifted_year.div_euclid(400);

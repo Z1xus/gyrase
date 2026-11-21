@@ -25,6 +25,14 @@ pub enum Format {
 }
 
 impl Format {
+	pub const ALL: [Self; 5] = [
+		Self::TwentyThreeAndMeV5,
+		Self::AncestryV2,
+		Self::FamilyFinder,
+		Self::MyHeritage,
+		Self::LivingDna,
+	];
+
 	pub const fn chip(self) -> Chip {
 		match self {
 			Self::TwentyThreeAndMeV5 => Chip::TwentyThreeAndMeV5,
@@ -32,6 +40,16 @@ impl Format {
 			Self::FamilyFinder => Chip::FtdnaV4,
 			Self::MyHeritage => Chip::MyHeritageGsa,
 			Self::LivingDna => Chip::LivingDnaV2,
+		}
+	}
+
+	pub const fn name(self) -> &'static str {
+		match self {
+			Self::TwentyThreeAndMeV5 => "23andme",
+			Self::AncestryV2 => "ancestry",
+			Self::FamilyFinder => "ftdna",
+			Self::MyHeritage => "myheritage",
+			Self::LivingDna => "livingdna",
 		}
 	}
 
