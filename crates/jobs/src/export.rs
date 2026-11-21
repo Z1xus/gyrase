@@ -32,12 +32,18 @@ impl Targets {
 						(site.grch38()?, site.orientation() == Orientation::Opposite)
 					}
 				};
+				let orient = |base: Base| if flip { base.complement() } else { base };
+				let alternate = site.alternate().map(orient);
+				let alternate = match site.grch38_reference() {
+					Some(base) if build == CallBuild::Grch38 && Some(base) == alternate => {
+						site.reference().map(orient)
+					}
+					_ => alternate,
+				};
 				let target = Target {
 					contig: contigs[site.chromosome().index()]?,
 					position: u64::from(position.checked_sub(1)?),
-					alternate: site
-						.alternate()
-						.map(|base| if flip { base.complement() } else { base }),
+					alternate,
 				};
 				Some((target, index))
 			})

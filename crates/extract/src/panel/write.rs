@@ -9,7 +9,7 @@ use crate::site::NameCode;
 use crate::{Chip, Error, Orientation};
 
 pub(super) const MAGIC: [u8; 8] = *b"GYRPANEL";
-pub(super) const VERSION: u16 = 1;
+pub(super) const VERSION: u16 = 2;
 pub(super) const ORIENTATION_BIT: u8 = 1 << 6;
 pub(super) const ALLELE_SHIFT: u32 = 3;
 pub(super) const RESERVED_BITS: u8 = 1 << 7;
@@ -61,11 +61,12 @@ impl Panel {
 		Ok(())
 	}
 
-	fn columns(&self) -> Result<[Vec<u8>; 5], Error> {
+	fn columns(&self) -> Result<[Vec<u8>; 6], Error> {
 		let mut positions = Vec::new();
 		let mut offsets = Vec::new();
 		let mut names = Vec::new();
 		let mut alleles = Vec::with_capacity(self.sites.len());
+		let mut grch38_references = Vec::with_capacity(self.sites.len());
 		let mut chips = Vec::with_capacity(self.sites.len() * 2);
 		let mut previous_chromosome = None;
 		let mut previous_position = 0u32;
@@ -98,8 +99,9 @@ impl Panel {
 					| (base_code(site.alternate) << ALLELE_SHIFT)
 					| orientation,
 			);
+			grch38_references.push(base_code(site.grch38_reference));
 			chips.extend_from_slice(&site.chips.bits().to_le_bytes());
 		}
-		Ok([positions, offsets, names, alleles, chips])
+		Ok([positions, offsets, names, alleles, grch38_references, chips])
 	}
 }

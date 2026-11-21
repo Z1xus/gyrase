@@ -362,7 +362,22 @@ impl<'a> Collector<'a> {
 			base.and_then(Allele::from_base)
 				.map(|allele| if flip { allele.complement() } else { allele })
 		};
-		(orient(site.reference()), orient(site.alternate()))
+		let (reference, alternate) = (orient(site.reference()), orient(site.alternate()));
+		match self.genome_reference(site) {
+			Some(base) if Some(base) == alternate => (alternate, reference),
+			_ => (reference, alternate),
+		}
+	}
+
+	fn genome_reference(&self, site: &PanelSite) -> Option<Allele> {
+		match self.build {
+			CallBuild::Grch37 => None,
+			CallBuild::Grch38 => site.grch38_reference().and_then(Allele::from_base),
+		}
+	}
+
+	fn confirmed(&self, site: &PanelSite, reference: Allele) -> bool {
+		self.build == CallBuild::Grch37 || self.genome_reference(site) == Some(reference)
 	}
 
 	fn record<S: Site>(
@@ -527,7 +542,11 @@ impl<'a> Collector<'a> {
 		if known.is_some() && known != Some(reference) && known != alternate {
 			return Verdict::Missing;
 		}
-		let reference = known.unwrap_or(reference);
+		let Some(reference) =
+			known.or_else(|| Some(reference).filter(|&allele| self.confirmed(site, allele)))
+		else {
+			return Verdict::Missing;
+		};
 		if !passed {
 			return Verdict::Missing;
 		}
@@ -600,7 +619,10 @@ impl<'a> Collector<'a> {
 				continue;
 			};
 			let ploidy = expected_ploidy(assumed, site.chromosome(), site.grch37());
-			let (reference, _) = self.expected(site);
+			let reference = self
+				.expected(site)
+				.0
+				.filter(|&allele| self.confirmed(site, allele));
 			let seen = self
 				.seen
 				.get(site.chromosome().index())

@@ -24,6 +24,7 @@ pub struct Site {
 	pub(crate) name: NameCode,
 	pub(crate) reference: Option<Base>,
 	pub(crate) alternate: Option<Base>,
+	pub(crate) grch38_reference: Option<Base>,
 	pub(crate) orientation: Orientation,
 	pub(crate) chips: ChipSet,
 }
@@ -53,6 +54,10 @@ impl Site {
 		self.alternate
 	}
 
+	pub const fn grch38_reference(&self) -> Option<Base> {
+		self.grch38_reference
+	}
+
 	pub const fn orientation(&self) -> Orientation {
 		self.orientation
 	}
@@ -71,6 +76,7 @@ pub struct SiteEntry {
 	pub orientation: Orientation,
 	pub reference: Option<Base>,
 	pub alternate: Option<Base>,
+	pub grch38_reference: Option<Base>,
 	pub chips: ChipSet,
 }
 

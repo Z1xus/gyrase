@@ -60,6 +60,7 @@ impl Panel {
 				name,
 				reference: entry.reference.filter(|base| *base != Base::N),
 				alternate: entry.alternate.filter(|base| *base != Base::N),
+				grch38_reference: entry.grch38_reference.filter(|base| *base != Base::N),
 				orientation: entry.orientation,
 				chips: entry.chips,
 			});

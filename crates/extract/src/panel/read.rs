@@ -63,16 +63,7 @@ impl Panel {
 		if name_count > MAX_NAMES {
 			return Err(Error::Corrupt("name count"));
 		}
-		let mut names = Vec::new();
-		for _ in 0..name_count {
-			let len = usize::from(bytes.u8()?);
-			let name = std::str::from_utf8(bytes.take(len)?)
-				.map_err(|_| Error::Corrupt("name encoding"))?;
-			if !valid_name(name) {
-				return Err(Error::InvalidName(name.to_owned()));
-			}
-			names.push(Box::from(name));
-		}
+		let names = read_names(&mut bytes, name_count)?;
 		let mut counts = [0usize; Chromosome::COUNT];
 		let mut total = 0usize;
 		for count in &mut counts {
@@ -88,11 +79,15 @@ impl Panel {
 		let mut offsets = bytes.section()?;
 		let mut name_codes = bytes.section()?;
 		let mut alleles = bytes.section()?;
+		let mut grch38_references = bytes.section()?;
 		let mut chips = bytes.section()?;
 		if !bytes.is_empty() {
 			return Err(Error::Corrupt("trailing bytes"));
 		}
-		if alleles.len() != site_count || chips.len() != site_count * 2 {
+		if alleles.len() != site_count
+			|| grch38_references.len() != site_count
+			|| chips.len() != site_count * 2
+		{
 			return Err(Error::Corrupt("column length"));
 		}
 		let mut sites = Vec::with_capacity(site_count);
@@ -132,6 +127,7 @@ impl Panel {
 					name,
 					reference: base_from_code(packed & ALLELE_MASK)?,
 					alternate: base_from_code((packed >> ALLELE_SHIFT) & ALLELE_MASK)?,
+					grch38_reference: base_from_code(grch38_references.u8()?)?,
 					orientation,
 					chips: ChipSet::from_bits(chips.u16()?).ok_or(Error::Corrupt("chip bits"))?,
 				});
@@ -142,6 +138,20 @@ impl Panel {
 		}
 		Ok(Self { sites, names })
 	}
+}
+
+fn read_names(bytes: &mut Bytes<'_>, count: usize) -> Result<Vec<Box<str>>, Error> {
+	let mut names = Vec::new();
+	for _ in 0..count {
+		let len = usize::from(bytes.u8()?);
+		let name =
+			std::str::from_utf8(bytes.take(len)?).map_err(|_| Error::Corrupt("name encoding"))?;
+		if !valid_name(name) {
+			return Err(Error::InvalidName(name.to_owned()));
+		}
+		names.push(Box::from(name));
+	}
+	Ok(names)
 }
 
 fn decode_name(code: u64, name_count: usize) -> Result<NameCode, Error> {
