@@ -41,6 +41,11 @@ impl Prepared {
 		Self::plan(self.plan.sample.clone(), formats, output)
 	}
 
+	pub fn replanned(self) -> Self {
+		self.with(self.formats.clone(), self.output.clone())
+			.unwrap_or(self)
+	}
+
 	fn plan(sample: Sample, formats: Vec<Format>, output: PathBuf) -> Result<Self, String> {
 		let store = Store::locate().map_err(|error| message::text(&error))?;
 		let request = Request {

@@ -16,7 +16,7 @@ pub fn spawn(session: &Session, prepared: &Prepared) -> Cancel {
 		let outcome = execute(&session, &plan, &worker_cancel);
 		session
 			.app()
-			.upgrade_in_event_loop(move |app| session.apply(&app, |screen| screen.finish(outcome)))
+			.upgrade_in_event_loop(move |app| session.finish(&app, outcome))
 			.ok();
 	});
 	cancel

@@ -23,10 +23,4 @@ pub fn attach(app: &App) {
 			app.window().set_minimized(true);
 		}
 	});
-	let weak = app.as_weak();
-	app.on_close_window(move || {
-		if let Some(app) = weak.upgrade() {
-			app.hide().ok();
-		}
-	});
 }

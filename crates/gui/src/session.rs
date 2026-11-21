@@ -1,9 +1,10 @@
 use std::mem;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use slint::{ComponentHandle, Weak};
+use gyrase_jobs::{Error, Report};
+use slint::{CloseRequestResponse, ComponentHandle, Weak};
 
-use crate::screen::Screen;
+use crate::screen::{Exit, Screen};
 use crate::{App, dialogs, run, show};
 
 const FOLDER_FAILED: &str = "Couldn't open the folder.";
@@ -36,6 +37,25 @@ impl Session {
 		let mut screen = self.lock();
 		*screen = change(mem::take(&mut *screen));
 		show::screen(app, &screen);
+	}
+
+	pub fn finish(&self, app: &App, outcome: Result<Report, Error>) {
+		let exit = self.lock().exit();
+		self.apply(app, |screen| screen.finish(outcome));
+		if exit == Exit::Quit {
+			app.hide().ok();
+		}
+	}
+
+	pub fn close(&self) -> CloseRequestResponse {
+		let Some(app) = self.app.upgrade() else {
+			return CloseRequestResponse::HideWindow;
+		};
+		self.apply(&app, Screen::close);
+		match self.lock().exit() {
+			Exit::Quit => CloseRequestResponse::KeepWindowShown,
+			Exit::Stay => CloseRequestResponse::HideWindow,
+		}
 	}
 
 	pub fn connect(&self, app: &App) {
@@ -81,6 +101,21 @@ impl Session {
 			let session = self.clone();
 			move || session.update(Screen::cancel)
 		});
+		app.on_close_window({
+			let session = self.clone();
+			let app = app.as_weak();
+			move || {
+				if session.close() == CloseRequestResponse::HideWindow
+					&& let Some(app) = app.upgrade()
+				{
+					app.hide().ok();
+				}
+			}
+		});
+		app.window().on_close_requested({
+			let session = self.clone();
+			move || session.close()
+		});
 		app.on_open_folder({
 			let session = self.clone();
 			move || session.open_folder()
@@ -91,10 +126,12 @@ impl Session {
 		let Some(app) = self.app.upgrade() else {
 			return;
 		};
-		if let Screen::Done(finished) = &*self.lock()
-			&& opener::open(&finished.prepared.output).is_err()
-		{
-			app.set_error(FOLDER_FAILED.into());
+		if let Screen::Done(finished) = &*self.lock() {
+			let error = match opener::open(&finished.prepared.output) {
+				Ok(()) => "",
+				Err(_) => FOLDER_FAILED,
+			};
+			app.set_error(error.into());
 		}
 	}
 

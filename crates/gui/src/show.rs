@@ -20,7 +20,7 @@ pub fn screen(app: &App, screen: &Screen) {
 			starting(app, prepared);
 			status(app, View::Running, None);
 		}
-		Screen::Stopping(prepared) => {
+		Screen::Stopping(prepared, _) => {
 			sample(app, prepared);
 			app.set_stage_label(STOPPING.into());
 			status(app, View::Stopping, None);

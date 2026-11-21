@@ -11,11 +11,17 @@ pub struct Finished {
 	pub report: Report,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Exit {
+	Stay,
+	Quit,
+}
+
 pub enum Screen {
 	Pick(Option<String>),
 	Ready(Prepared),
 	Running(Prepared, Cancel),
-	Stopping(Prepared),
+	Stopping(Prepared, Exit),
 	Done(Finished),
 	Failed(Prepared, String),
 }
@@ -29,7 +35,7 @@ impl Default for Screen {
 impl Screen {
 	pub fn open(self, paths: &[PathBuf]) -> Self {
 		match self {
-			Self::Running(..) | Self::Stopping(_) => self,
+			Self::Running(..) | Self::Stopping(..) => self,
 			Self::Ready(prepared) | Self::Failed(prepared, _) => match Prepared::open(paths) {
 				Ok(opened) => Self::Ready(opened),
 				Err(message) => Self::Failed(prepared, message),
@@ -43,7 +49,7 @@ impl Screen {
 
 	pub fn clear(self) -> Self {
 		match self {
-			Self::Running(..) | Self::Stopping(_) => self,
+			Self::Running(..) | Self::Stopping(..) => self,
 			Self::Pick(_) | Self::Ready(_) | Self::Done(_) | Self::Failed(..) => Self::default(),
 		}
 	}
@@ -70,21 +76,37 @@ impl Screen {
 	}
 
 	pub fn cancel(self) -> Self {
+		self.stop(Exit::Stay)
+	}
+
+	pub fn close(self) -> Self {
+		self.stop(Exit::Quit)
+	}
+
+	pub fn exit(&self) -> Exit {
+		match self {
+			Self::Stopping(_, exit) => *exit,
+			_ => Exit::Stay,
+		}
+	}
+
+	fn stop(self, exit: Exit) -> Self {
 		match self {
 			Self::Running(prepared, cancel) => {
 				cancel.cancel();
-				Self::Stopping(prepared)
+				Self::Stopping(prepared, exit)
 			}
+			Self::Stopping(prepared, stopping) => Self::Stopping(prepared, stopping.max(exit)),
 			other => other,
 		}
 	}
 
 	pub fn finish(self, outcome: Result<Report, Error>) -> Self {
 		match self {
-			Self::Running(prepared, _) | Self::Stopping(prepared) => match outcome {
+			Self::Running(prepared, _) | Self::Stopping(prepared, _) => match outcome {
 				Ok(report) => Self::Done(Finished { prepared, report }),
-				Err(Error::Cancelled) => Self::Ready(prepared),
-				Err(error) => Self::Failed(prepared, message::text(&error)),
+				Err(Error::Cancelled) => Self::Ready(prepared.replanned()),
+				Err(error) => Self::Failed(prepared.replanned(), message::text(&error)),
 			},
 			other => other,
 		}
