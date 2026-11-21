@@ -5,7 +5,7 @@ use crate::num::round_i32;
 const MIN_SEED_LENGTH: i32 = 19;
 const LONG_READ_LENGTH: f64 = 50.0;
 const MAX_MAPQ: i32 = 60;
-const MAPQ_SCALE: f64 = 6.02;
+const MAPQ_SCALE: f64 = 1.2;
 const REPEAT_SCALE: f64 = 4.343;
 const ROUNDING: f64 = 0.499;
 const OVERLAP_DIVISOR: u32 = 2;
