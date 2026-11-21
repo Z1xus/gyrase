@@ -27,13 +27,13 @@ export component RunningView inherits VerticalLayout {
 
         Card {
             VerticalLayout {
-                padding: Metrics.pad;
-                padding-top: 10px;
-                padding-bottom: 10px;
+                padding: Metrics.gap;
+                padding-left: Metrics.pad;
+                padding-right: Metrics.pad;
 
                 for step[index] in root.steps: HorizontalLayout {
                     height: Metrics.row;
-                    spacing: 12px;
+                    spacing: Metrics.inline;
 
                     Icon {
                         source: Icons.step(step.kind);
@@ -46,7 +46,7 @@ export component RunningView inherits VerticalLayout {
                         text: step.label;
                         horizontal-stretch: 1;
                         font-size: 13px;
-                        font-weight: index == root.current ? 600 : 400;
+                        font-weight: index == root.current ? 700 : 400;
                         color: index == root.current ? Gel.ink : Gel.ink-muted;
                         opacity: index > root.current ? 0.5 : 1;
                         vertical-alignment: center;
@@ -54,7 +54,8 @@ export component RunningView inherits VerticalLayout {
                 }
 
                 VerticalLayout {
-                    padding-top: 12px;
+                    padding-top: Metrics.gap;
+                    padding-bottom: Metrics.gap;
                     spacing: Metrics.gap;
 
                     ProgressBar {

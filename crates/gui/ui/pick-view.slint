@@ -8,7 +8,7 @@ export component PickView inherits VerticalLayout {
     in property <string> error;
     callback choose;
 
-    spacing: Metrics.pad;
+    spacing: Metrics.section;
 
     Rectangle {
         vertical-stretch: 1;
@@ -34,7 +34,7 @@ export component PickView inherits VerticalLayout {
             Text {
                 text: root.dragging ? "Release to add" : "Drop your files here";
                 font-size: 20px;
-                font-weight: 600;
+                font-weight: 700;
                 color: Gel.ink;
                 horizontal-alignment: center;
             }
@@ -48,14 +48,18 @@ export component PickView inherits VerticalLayout {
         }
     }
 
-    if root.error != "": ErrorLine {
-        text: root.error;
-    }
+    VerticalLayout {
+        spacing: Metrics.pad;
 
-    PrimaryButton {
-        text: "Choose Files";
-        clicked => {
-            root.choose();
+        if root.error != "": ErrorLine {
+            text: root.error;
+        }
+
+        PrimaryButton {
+            text: "Choose Files";
+            clicked => {
+                root.choose();
+            }
         }
     }
 }

@@ -29,7 +29,7 @@ export component DoneView inherits VerticalLayout {
         Text {
             text: "Your files are ready";
             font-size: 20px;
-            font-weight: 600;
+            font-weight: 700;
             color: Gel.ink;
             horizontal-alignment: center;
         }
@@ -40,13 +40,13 @@ export component DoneView inherits VerticalLayout {
 
         Card {
             VerticalLayout {
-                padding: Metrics.pad;
-                padding-top: 10px;
-                padding-bottom: 10px;
+                padding: Metrics.gap;
+                padding-left: Metrics.pad;
+                padding-right: Metrics.pad;
 
                 for entry in root.written: HorizontalLayout {
-                    height: Metrics.row + 4px;
-                    spacing: 12px;
+                    height: Metrics.row;
+                    spacing: Metrics.inline;
 
                     Icon {
                         source: entry.raw ? Icons.file : Icons.dna;

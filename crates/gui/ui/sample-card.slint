@@ -8,7 +8,7 @@ export component Tile inherits Rectangle {
 
     width: root.size;
     height: root.size;
-    border-radius: root.size * 0.3;
+    border-radius: root.size / 4;
     background: Gel.accent-wash;
 
     Icon {
@@ -28,8 +28,9 @@ export component SampleCard inherits Card {
 
     HorizontalLayout {
         padding: Metrics.pad;
-        padding-right: root.removable ? 12px : Metrics.pad;
-        spacing: 12px;
+        // the icon button keeps its 16px glyph 8px inside its own edge
+        padding-right: root.removable ? Metrics.pad - 8px : Metrics.pad;
+        spacing: Metrics.inline;
 
         Tile {
             source: Icons.dna;
@@ -42,8 +43,8 @@ export component SampleCard inherits Card {
 
             Text {
                 text: root.name;
-                font-size: 15px;
-                font-weight: 600;
+                font-size: 14px;
+                font-weight: 700;
                 color: Gel.ink;
                 overflow: elide;
             }

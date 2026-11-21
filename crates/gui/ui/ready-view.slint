@@ -8,12 +8,12 @@ component FolderRow inherits Card {
     in property <string> path;
     callback choose;
 
-    height: Metrics.control + 8px;
+    height: Metrics.control;
 
     HorizontalLayout {
         padding-left: Metrics.pad;
         padding-right: Metrics.pad;
-        spacing: 12px;
+        spacing: Metrics.inline;
 
         Icon {
             source: Icons.folder;
@@ -32,7 +32,7 @@ component FolderRow inherits Card {
         Text {
             text: "Change";
             font-size: 13px;
-            font-weight: 600;
+            font-weight: 700;
             color: Gel.accent-ink;
             vertical-alignment: center;
         }

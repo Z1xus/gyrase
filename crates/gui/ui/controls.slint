@@ -63,7 +63,7 @@ export component PrimaryButton inherits Rectangle {
     Text {
         text: root.text;
         font-size: 14px;
-        font-weight: 600;
+        font-weight: 700;
         color: Gel.accent-label;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -90,7 +90,7 @@ export component SecondaryButton inherits Rectangle {
     Text {
         text: root.text;
         font-size: 14px;
-        font-weight: 500;
+        font-weight: 700;
         color: Gel.ink;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -145,7 +145,7 @@ export component Toggle inherits Rectangle {
     Text {
         text: root.text;
         font-size: 13px;
-        font-weight: root.on ? 600 : 500;
+        font-weight: root.on ? 700 : 400;
         color: root.on ? Gel.accent-ink : Gel.ink-muted;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -185,7 +185,7 @@ export component ProgressBar inherits Rectangle {
 export component ErrorLine inherits HorizontalLayout {
     in property <string> text;
 
-    spacing: Metrics.gap;
+    spacing: Metrics.inline;
     height: 20px;
 
     Icon {
@@ -205,7 +205,6 @@ export component ErrorLine inherits HorizontalLayout {
 
 export component Caption inherits Text {
     font-size: 12px;
-    font-weight: 500;
     color: Gel.ink-muted;
 }
 
