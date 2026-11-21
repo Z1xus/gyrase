@@ -1,9 +1,5 @@
 # gyrase-extract
 
-Consumer microarray panel data and raw genotype exporters for 23andMe, AncestryDNA, FTDNA, MyHeritage and LivingDNA.
+Consumer DNA microarray panels and raw genotype file exporters for [gyrase](https://github.com/Z1xus/gyrase).
 
-Part of [gyrase](https://github.com/Z1xus/gyrase).
-
-## License
-
-Licensed under [GPL-3.0-or-later](https://www.gnu.org/licenses/gpl-3.0.html).
+Licensed under GPL-3.0-or-later.

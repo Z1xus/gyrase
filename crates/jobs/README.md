@@ -1,7 +1,5 @@
 # gyrase-jobs
 
-Job planner and pipeline runner for [gyrase](https://github.com/Z1xus/gyrase).
+Alignment, variant calling and export pipeline runner for [gyrase](https://github.com/Z1xus/gyrase).
 
-## License
-
-Licensed under [GPL-3.0-or-later](https://www.gnu.org/licenses/gpl-3.0.html).
+Licensed under GPL-3.0-or-later.
