@@ -30,6 +30,10 @@ pub enum Error {
 	MissingIndex(PathBuf),
 	#[error("{0}: not a BAM or CRAM file")]
 	NotAlignments(PathBuf),
+	#[error("{0}: no sample in the file")]
+	NoSamples(PathBuf),
+	#[error("{0}: cannot tell the genome build from the contigs")]
+	UnknownBuild(PathBuf),
 	#[error("contig missing from the reference")]
 	UnknownContig,
 	#[error(transparent)]

@@ -4,9 +4,11 @@ use std::sync::Arc;
 
 use gyrase_genome::{ContigId, Interval, Reference};
 use gyrase_index::{Crai, DEFAULT_MAX_GAP, Index};
-use gyrase_io::Workers;
+use gyrase_io::{Workers, decode};
 use gyrase_reads::cram::{CramBatch, CramReader};
-use gyrase_reads::{BamReader, Header, Line, Query, RecordBatch, RecordError, RecordRef};
+use gyrase_reads::{
+	BamReader, Header, Line, Query, RecordBatch, RecordError, RecordRef, SamReader,
+};
 
 use crate::{Error, Input, Kind};
 
@@ -170,6 +172,16 @@ pub fn header(
 				.header()
 				.clone(),
 		),
+		Kind::Sam => {
+			Ok(SamReader::new(
+				decode(Box::new(file), workers).map_err(|source| Error::Read {
+					path: input.path.clone(),
+					source,
+				})?,
+			)?
+			.header()
+			.clone())
+		}
 		_ => Err(Error::NotAlignments(input.path.clone())),
 	}
 }

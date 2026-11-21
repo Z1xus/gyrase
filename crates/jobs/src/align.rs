@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::{self, Read};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,6 +18,7 @@ use synapton::{
 };
 
 use crate::bam::write_sorted;
+use crate::counted::Counted;
 use crate::{Cancel, Error, Estimate, Input, Lane, Progress, Stage};
 
 const BATCH_READS: usize = 1 << 16;
@@ -41,11 +41,6 @@ pub(crate) struct Alignment<'a> {
 	pub compute: &'a Workers,
 	pub io: &'a Workers,
 	pub cancel: &'a Cancel,
-}
-
-struct Counted {
-	inner: File,
-	read: Arc<AtomicU64>,
 }
 
 pub(crate) fn index(reference: &Reference, path: &Path, workers: &Workers) -> Result<Index, Error> {
@@ -173,15 +168,6 @@ impl Views<'_> {
 	}
 }
 
-impl Read for Counted {
-	fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-		let read = self.inner.read(buffer)?;
-		self.read
-			.fetch_add(u64::try_from(read).unwrap_or(0), Ordering::Relaxed);
-		Ok(read)
-	}
-}
-
 fn align_chunk(
 	aligner: &Aligner<'_>,
 	sizes: &mut Option<InsertSizes>,
@@ -259,11 +245,7 @@ fn open(input: &Input, read: &Arc<AtomicU64>, io: &Workers) -> Result<Decoded, E
 		path: input.path.clone(),
 		source,
 	})?;
-	let counted = Counted {
-		inner,
-		read: Arc::clone(read),
-	};
-	decode(Box::new(counted), io).map_err(|source| Error::Read {
+	decode(Box::new(Counted::new(inner, read)), io).map_err(|source| Error::Read {
 		path: input.path.clone(),
 		source,
 	})

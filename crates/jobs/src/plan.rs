@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use gyrase_extract::{
-	CallBuild, CallThresholds, Format, Panel, Settings, Sex, SexCall, Summary, Timestamp,
+	CallBuild, CallThresholds, Format, Panel, Settings, Sex, SexCall, SiteCall, Summary, Timestamp,
 	write_raw_data,
 };
 use gyrase_genome::{Build, Reference};
@@ -12,7 +12,8 @@ use gyrase_io::Workers;
 
 use crate::align::{self, Alignment};
 use crate::alignments::{header, indexed};
-use crate::bam::{coordinate_sorted, index, sort, sort_budget};
+use crate::bam::{Sorting, coordinate_sorted, index, sort_budget};
+use crate::genotypes;
 use crate::partial::Partial;
 use crate::{
 	Alignments, Calling, Cancel, Error, Estimate, Input, Kind, Lane, Progress, Resources, Sample,
@@ -40,7 +41,7 @@ pub struct Plan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outputs {
 	pub alignments: Option<PathBuf>,
-	pub variants: PathBuf,
+	pub variants: Option<PathBuf>,
 	pub raw: Vec<(Format, PathBuf)>,
 }
 
@@ -59,17 +60,41 @@ struct Pools {
 impl Plan {
 	pub fn new(sample: Sample, store: &Store, request: &Request) -> Result<Self, Error> {
 		let file = |suffix: &str| request.output.join(format!("{}.{suffix}", sample.name));
+		let raw = |exported: bool| -> Vec<(Format, PathBuf)> {
+			request
+				.formats
+				.iter()
+				.filter(|_| exported)
+				.map(|&format| {
+					(
+						format,
+						file(&format!("{}.{}", format.name(), format.extension())),
+					)
+				})
+				.collect()
+		};
+		if let Source::Variants(input) = &sample.source {
+			let build = genotypes::build(input, &Workers::new(IO_THREADS)?)?;
+			CallBuild::try_from(build)?;
+			return Ok(Self {
+				build,
+				stages: vec![Stage::Export],
+				outputs: Outputs {
+					alignments: None,
+					variants: None,
+					raw: raw(true),
+				},
+				sample,
+			});
+		}
 		let (build, steps, alignments) = match &sample.source {
 			Source::Alignments(input) => {
 				let header = header(input, None, &Workers::new(IO_THREADS)?)?;
 				let build = Build::detect(&header.contigs()?).unwrap_or(DEFAULT_BUILD);
-				match (indexed(input), input.kind, coordinate_sorted(&header)) {
-					(true, _, _) => (build, Vec::new(), None),
-					(false, Kind::Bam, true) => (build, vec![Stage::Index], None),
-					(false, Kind::Bam, false) => {
-						(build, vec![Stage::Sort], Some(file("sorted.bam")))
-					}
-					(false, _, _) => return Err(Error::MissingIndex(input.path.clone())),
+				match (input.kind, indexed(input), coordinate_sorted(&header)) {
+					(Kind::Bam | Kind::Cram, true, _) => (build, Vec::new(), None),
+					(Kind::Bam | Kind::Cram, false, true) => (build, vec![Stage::Index], None),
+					_ => (build, vec![Stage::Sort], Some(file("sorted.bam"))),
 				}
 			}
 			Source::Reads(_) => (
@@ -96,18 +121,8 @@ impl Plan {
 		}
 		let outputs = Outputs {
 			alignments,
-			variants: file("vcf.gz"),
-			raw: request
-				.formats
-				.iter()
-				.filter(|_| exported)
-				.map(|&format| {
-					(
-						format,
-						file(&format!("{}.{}", format.name(), format.extension())),
-					)
-				})
-				.collect(),
+			variants: Some(file("vcf.gz")),
+			raw: raw(exported),
 		};
 		Ok(Self {
 			sample,
@@ -124,7 +139,11 @@ impl Plan {
 		cancel: &Cancel,
 		mut report: impl FnMut(Progress),
 	) -> Result<Report, Error> {
+		self.create_folder()?;
 		let pools = Pools::new(resources)?;
+		if let Source::Variants(input) = &self.sample.source {
+			return self.convert(input, &pools, cancel, &mut report);
+		}
 		let reference = Arc::new(Reference::open(&self.reference(
 			store,
 			cancel,
@@ -139,8 +158,13 @@ impl Plan {
 				input
 			}
 			(Source::Alignments(input), Some(path)) => {
-				let budget = sort_budget(resources.memory);
-				sort(input, path, budget, &pools.compute, cancel, &mut report)?;
+				Sorting {
+					reference: &reference,
+					budget: sort_budget(resources.memory),
+					workers: &pools.compute,
+					cancel,
+				}
+				.run(input, path, &mut report)?;
 				prepared = Input::open(path)?;
 				&prepared
 			}
@@ -177,7 +201,12 @@ impl Plan {
 		let mut estimate = Estimate::new(Stage::Call, total, Instant::now());
 		report(estimate.progress());
 		let survey = calling.survey(&shards)?;
-		let mut vcf = Vcf::create(&self.outputs.variants, &alignments, &pools.io)?;
+		let variants = self
+			.outputs
+			.variants
+			.as_ref()
+			.ok_or_else(|| Error::NotAlignments(self.sample.path().to_owned()))?;
+		let mut vcf = Vcf::create(variants, &alignments, &pools.io)?;
 		let mut done = 0;
 		let mut variants = 0;
 		let genotyped = calling.call(&shards, &survey, &targets.targets, |shard, calls| {
@@ -188,33 +217,91 @@ impl Plan {
 		})?;
 		vcf.finish(&pools.io)?;
 		let mut raw = Vec::new();
-		if let Some(build) = call_build {
+		if call_build.is_some() {
 			let calls = targets.site_calls(&panel, &genotyped);
 			let mut estimate =
 				Estimate::new(Stage::Export, count(self.outputs.raw.len()), Instant::now());
-			for (index, (format, path)) in self.outputs.raw.iter().enumerate() {
-				cancel.check()?;
-				let settings = Settings {
-					format: *format,
-					sex: match survey.sex {
-						SexCall::Determined(sex) => sex,
-						SexCall::Undetermined => Sex::Female,
-					},
-					thresholds: CallThresholds::DEFAULT,
-					build,
-					generated: now()?,
-				};
-				let (partial, file) = Partial::create(path)?;
-				raw.push((*format, write_raw_data(&panel, &calls, &settings, file)?));
-				partial.commit()?;
-				report(estimate.advance(count(index + 1), Instant::now()));
-			}
+			raw = self.write_raw(&panel, &calls, survey.sex, cancel, |done| {
+				report(estimate.advance(done, Instant::now()));
+			})?;
 		}
 		Ok(Report {
 			sex: survey.sex,
 			variants,
 			raw,
 		})
+	}
+
+	fn create_folder(&self) -> Result<(), Error> {
+		let first = self
+			.outputs
+			.variants
+			.iter()
+			.chain(self.outputs.raw.iter().map(|(_, path)| path))
+			.next();
+		if let Some(folder) = first.and_then(|path| path.parent()) {
+			std::fs::create_dir_all(folder).map_err(|source| Error::Write {
+				path: folder.to_owned(),
+				source,
+			})?;
+		}
+		Ok(())
+	}
+
+	fn convert(
+		&self,
+		input: &Input,
+		pools: &Pools,
+		cancel: &Cancel,
+		report: &mut impl FnMut(Progress),
+	) -> Result<Report, Error> {
+		let panel = Panel::embedded(&pools.io)?;
+		let formats = count(self.outputs.raw.len());
+		let mut estimate = Estimate::new(Stage::Export, input.size + formats, Instant::now());
+		report(estimate.progress());
+		let genotypes = genotypes::read(input, &panel, &pools.compute, |bytes| {
+			cancel.check()?;
+			report(estimate.advance(bytes, Instant::now()));
+			Ok(())
+		})?;
+		let raw = self.write_raw(&panel, &genotypes.calls, genotypes.sex, cancel, |done| {
+			report(estimate.advance(input.size + done, Instant::now()));
+		})?;
+		Ok(Report {
+			sex: genotypes.sex,
+			variants: genotypes.records,
+			raw,
+		})
+	}
+
+	fn write_raw(
+		&self,
+		panel: &Panel,
+		calls: &[SiteCall],
+		sex: SexCall,
+		cancel: &Cancel,
+		mut advance: impl FnMut(u64),
+	) -> Result<Vec<(Format, Summary)>, Error> {
+		let build = CallBuild::try_from(self.build)?;
+		let mut raw = Vec::new();
+		for (index, (format, path)) in self.outputs.raw.iter().enumerate() {
+			cancel.check()?;
+			let settings = Settings {
+				format: *format,
+				sex: match sex {
+					SexCall::Determined(sex) => sex,
+					SexCall::Undetermined => Sex::Female,
+				},
+				thresholds: CallThresholds::DEFAULT,
+				build,
+				generated: now()?,
+			};
+			let (partial, file) = Partial::create(path)?;
+			raw.push((*format, write_raw_data(panel, calls, &settings, file)?));
+			partial.commit()?;
+			advance(count(index + 1));
+		}
+		Ok(raw)
 	}
 
 	#[allow(clippy::too_many_arguments)]
