@@ -1,10 +1,11 @@
 use std::mem::size_of;
+use std::sync::atomic::AtomicBool;
 
 use gyrase_io::Workers;
 use rayon::prelude::*;
 
 use crate::bytes::{i32_le, u16_le, u32_le};
-use crate::error::SortError;
+use crate::error::{Error, SortError};
 use crate::record::Flags;
 
 const BYTES_PER_SLOT: usize = 128;
@@ -81,9 +82,11 @@ impl Buffer {
 		self.arena.extend_from_slice(rest);
 	}
 
-	pub(super) fn sort(&mut self, workers: &Workers) {
+	pub(super) fn sort(&mut self, workers: &Workers, cancel: &AtomicBool) -> Result<(), Error> {
+		super::check(cancel)?;
 		let slots = &mut self.slots;
 		workers.install(|| slots.par_sort_unstable_by_key(|slot| (slot.key, slot.offset)));
+		super::check(cancel)
 	}
 
 	pub(super) fn clear(&mut self) {

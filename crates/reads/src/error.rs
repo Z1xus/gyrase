@@ -24,6 +24,8 @@ pub enum Error {
 	Sort(#[from] SortError),
 	#[error(transparent)]
 	Mark(#[from] MarkError),
+	#[error("cancelled")]
+	Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

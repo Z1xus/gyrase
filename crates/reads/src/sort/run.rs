@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use gyrase_io::{BgzfReader, BgzfWriter, Input, Level, Readahead, Workers};
 
@@ -53,9 +53,11 @@ impl RunFile {
 		directory: &Path,
 		buffer: &Buffer,
 		workers: &Workers,
+		cancel: &AtomicBool,
 	) -> Result<Self, Error> {
 		let mut run = Self::create(directory, workers)?;
 		for index in 0..buffer.len() {
+			super::check(cancel)?;
 			run.push(buffer.record_at(index).unwrap_or_default())?;
 		}
 		run.finish()

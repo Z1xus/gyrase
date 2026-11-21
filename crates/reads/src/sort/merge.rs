@@ -2,10 +2,12 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
 use gyrase_io::Workers;
 
 use super::buffer::Buffer;
+use super::check;
 use super::run::{RunFile, RunReader};
 use crate::error::Error;
 
@@ -46,17 +48,19 @@ pub(super) fn collapse(
 	runs: &mut Vec<RunFile>,
 	directory: &Path,
 	workers: &Workers,
+	cancel: &AtomicBool,
 ) -> Result<(), Error> {
 	while runs.len() > FAN_IN {
 		let mut pending = std::mem::take(runs).into_iter();
 		let mut next = Vec::new();
 		loop {
+			check(cancel)?;
 			let group: Vec<RunFile> = pending.by_ref().take(FAN_IN).collect();
 			if group.is_empty() {
 				break;
 			}
 			let mut output = RunFile::create(directory, workers)?;
-			merge(None, &group, workers, |bytes| output.push(bytes))?;
+			merge(None, &group, workers, cancel, |bytes| output.push(bytes))?;
 			next.push(output.finish()?);
 		}
 		*runs = next;
@@ -68,6 +72,7 @@ pub(super) fn merge(
 	buffer: Option<&Buffer>,
 	runs: &[RunFile],
 	workers: &Workers,
+	cancel: &AtomicBool,
 	mut emit: impl FnMut(&[u8]) -> Result<(), Error>,
 ) -> Result<(), Error> {
 	let mut sources = Vec::with_capacity(runs.len() + 1);
@@ -85,6 +90,7 @@ pub(super) fn merge(
 		sources.push(source);
 	}
 	while let Some(Reverse((_, index))) = heap.pop() {
+		check(cancel)?;
 		let Some(source) = sources.get_mut(index) else {
 			continue;
 		};

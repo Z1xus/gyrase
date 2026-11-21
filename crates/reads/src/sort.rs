@@ -4,6 +4,7 @@ mod run;
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gyrase_index::{Format, Index};
 use gyrase_io::{Level, Workers};
@@ -20,6 +21,7 @@ use crate::record::RecordRef;
 pub struct Sorter<'w> {
 	header: Header,
 	workers: &'w Workers,
+	cancel: &'w AtomicBool,
 	directory: PathBuf,
 	buffer: Buffer,
 	runs: Vec<RunFile>,
@@ -38,12 +40,14 @@ impl<'w> Sorter<'w> {
 		budget: usize,
 		directory: impl Into<PathBuf>,
 		workers: &'w Workers,
+		cancel: &'w AtomicBool,
 	) -> Result<Self, Error> {
 		let mut header = header.clone();
 		header.set_sort_order(SortOrder::Coordinate);
 		Ok(Self {
 			header,
 			workers,
+			cancel,
 			directory: directory.into(),
 			buffer: Buffer::new(budget)?,
 			runs: Vec::new(),
@@ -87,8 +91,8 @@ impl<'w> Sorter<'w> {
 		level: Level,
 		settings: Option<MarkSettings>,
 	) -> Result<(Sorted<W>, Option<MarkStats>), Error> {
-		self.buffer.sort(self.workers);
-		merge::collapse(&mut self.runs, &self.directory, self.workers)?;
+		self.buffer.sort(self.workers, self.cancel)?;
+		merge::collapse(&mut self.runs, &self.directory, self.workers, self.cancel)?;
 		let (format, geometry) = index_layout(&self.header)?;
 		let mut marker = settings.map(|settings| Marker::new(settings, &self.header));
 		let mut writer = IndexedWriter::new(output, &self.header, geometry, level, self.workers)?;
@@ -97,6 +101,7 @@ impl<'w> Sorter<'w> {
 			Some(&self.buffer),
 			&self.runs,
 			self.workers,
+			self.cancel,
 			|bytes| match marker.as_mut() {
 				Some(marker) => marker.push(bytes, &mut emit),
 				None => emit(bytes),
@@ -118,10 +123,22 @@ impl<'w> Sorter<'w> {
 		if self.buffer.len() == 0 {
 			return Ok(());
 		}
-		self.buffer.sort(self.workers);
-		self.runs
-			.push(RunFile::write(&self.directory, &self.buffer, self.workers)?);
+		self.buffer.sort(self.workers, self.cancel)?;
+		self.runs.push(RunFile::write(
+			&self.directory,
+			&self.buffer,
+			self.workers,
+			self.cancel,
+		)?);
 		self.buffer.clear();
+		Ok(())
+	}
+}
+
+fn check(cancel: &AtomicBool) -> Result<(), Error> {
+	if cancel.load(Ordering::Relaxed) {
+		Err(Error::Cancelled)
+	} else {
 		Ok(())
 	}
 }
