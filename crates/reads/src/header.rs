@@ -62,7 +62,7 @@ impl Header {
 	pub fn parse(text: &[u8]) -> Result<Self, HeaderError> {
 		let text = std::str::from_utf8(text).map_err(|_| HeaderError::InvalidUtf8)?;
 		let mut header = Self::new();
-		for (index, line) in text.lines().enumerate() {
+		for (index, line) in text.trim_end_matches('\n').lines().enumerate() {
 			let number = index + 1;
 			match parse_line(line, number)? {
 				ParsedLine::Header(fields) => header.lines.push(Line::Header(fields)),
@@ -213,7 +213,13 @@ impl Header {
 				u32::try_from(self.references.len())
 					.map_err(|_| HeaderError::TooLarge { limit: usize::MAX })?,
 			);
-			self.by_name.insert(reference.name().to_owned(), id);
+			if self
+				.by_name
+				.insert(reference.name().to_owned(), id)
+				.is_some()
+			{
+				return Err(HeaderError::DuplicateReference(reference.name().to_owned()));
+			}
 			self.references.push(reference);
 			inserted.push(Line::Reference(id));
 		}

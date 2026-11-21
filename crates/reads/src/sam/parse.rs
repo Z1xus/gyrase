@@ -112,8 +112,8 @@ impl Parser {
 		record.set_mate_contig(mate_contig)?;
 		record.set_mate_position(mate_position)?;
 		record.set_template_length(template);
-		record.set_cigar(&self.ops)?;
 		parse_read(&line, bases, qualities, record)?;
+		record.set_cigar(&self.ops)?;
 		check_cigar_length(&line, record)?;
 		parse_tags(&mut line, record)
 	}
@@ -222,7 +222,7 @@ fn parse_read(
 
 fn check_cigar_length(line: &Line<'_>, record: &Record) -> Result<(), SamError> {
 	let view = record.view();
-	let cigar = view.stored_cigar();
+	let cigar = view.cigar();
 	let consistent = cigar.is_empty()
 		|| view.sequence().is_empty()
 		|| cigar.query_len() == view.sequence().len() as u64;

@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
 use gyrase_io::{Block, BlockReader, BlockSpan, Chunk, Input, VirtualOffset, Workers};
 
@@ -34,6 +34,7 @@ struct BatchReader {
 struct Pipeline {
 	ready: Receiver<Result<RecordBatch, Error>>,
 	recycle: SyncSender<RecordBatch>,
+	thread: Option<JoinHandle<()>>,
 }
 
 #[derive(Debug)]
@@ -134,6 +135,16 @@ impl BamReader {
 	}
 }
 
+impl Drop for Pipeline {
+	fn drop(&mut self) {
+		let (_, closed) = sync_channel(0);
+		drop(std::mem::replace(&mut self.ready, closed));
+		if let Some(thread) = self.thread.take() {
+			let _ = thread.join();
+		}
+	}
+}
+
 impl Pipeline {
 	fn read_batch(&mut self, batch: &mut RecordBatch) -> Result<bool, Error> {
 		match self.ready.recv() {
@@ -167,8 +178,12 @@ impl BatchReader {
 	fn spawn(self) -> Pipeline {
 		let (ready_out, ready) = sync_channel(BATCHES_READY);
 		let (recycle, recycled) = sync_channel(BATCHES_RECYCLED);
-		thread::spawn(move || self.run(&ready_out, &recycled));
-		Pipeline { ready, recycle }
+		let thread = thread::spawn(move || self.run(&ready_out, &recycled));
+		Pipeline {
+			ready,
+			recycle,
+			thread: Some(thread),
+		}
 	}
 
 	fn run(

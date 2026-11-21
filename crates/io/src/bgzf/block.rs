@@ -11,7 +11,10 @@ pub(crate) const EMPTY_BLOCK: [u8; 28] = [
 	0, 0,
 ];
 const GZIP_MAGIC: [u8; 3] = [0x1f, 0x8b, 8];
+const HEADER_CRC_FLAG: u8 = 2;
 const EXTRA_FLAG: u8 = 4;
+const NAME_FLAG: u8 = 8;
+const COMMENT_FLAG: u8 = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -26,18 +29,18 @@ pub(crate) struct Frame {
 	pub bytes: Vec<u8>,
 }
 
-pub(crate) fn is_bgzf(header: &[u8]) -> bool {
+pub(crate) fn has_magic(header: &[u8]) -> bool {
 	header.len() >= FIXED_HEADER_LEN
 		&& header.starts_with(&GZIP_MAGIC)
 		&& header[3] & EXTRA_FLAG != 0
-		&& block_size(header).is_some()
+}
+
+pub(crate) fn is_bgzf(header: &[u8]) -> bool {
+	has_magic(header) && block_size(header).is_some()
 }
 
 pub(crate) fn block_len(header: &[u8], offset: u64) -> Result<usize, Error> {
-	if header.len() < FIXED_HEADER_LEN
-		|| !header.starts_with(&GZIP_MAGIC)
-		|| header[3] & EXTRA_FLAG == 0
-	{
+	if !has_magic(header) {
 		return Err(Error::NotBgzf { offset });
 	}
 	let len = block_size(header).ok_or(Error::NotBgzf { offset })?;
@@ -49,6 +52,20 @@ pub(crate) fn block_len(header: &[u8], offset: u64) -> Result<usize, Error> {
 
 pub(crate) fn extra_len(header: &[u8]) -> usize {
 	usize::from(u16::from_le_bytes([header[10], header[11]]))
+}
+
+fn payload_start(bytes: &[u8]) -> Option<usize> {
+	let flags = bytes[3];
+	let mut start = FIXED_HEADER_LEN + extra_len(bytes);
+	for flag in [NAME_FLAG, COMMENT_FLAG] {
+		if flags & flag != 0 {
+			start += bytes.get(start..)?.iter().position(|&byte| byte == 0)? + 1;
+		}
+	}
+	if flags & HEADER_CRC_FLAG != 0 {
+		start += 2;
+	}
+	Some(start)
 }
 
 fn block_size(header: &[u8]) -> Option<usize> {
@@ -72,7 +89,7 @@ impl Frame {
 			offset: self.offset,
 		};
 		let bytes = &self.bytes;
-		let start = FIXED_HEADER_LEN + extra_len(bytes);
+		let start = payload_start(bytes).ok_or_else(corrupt)?;
 		let footer = bytes
 			.len()
 			.checked_sub(FOOTER_LEN)

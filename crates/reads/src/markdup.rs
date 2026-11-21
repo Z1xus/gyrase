@@ -6,6 +6,7 @@ use std::collections::{HashMap, VecDeque};
 
 use self::key::{Extent, PairKey, SingleKey, extent, mate_extent, pair_key, single_key};
 use crate::error::{Error, MarkError};
+use crate::header::{Header, Line};
 use crate::record::{Flags, RecordRef, Value};
 
 const FLAGS_AT: usize = 14;
@@ -65,6 +66,7 @@ struct Item {
 	contig: i32,
 	position: i32,
 	pos: i64,
+	library: u32,
 	examined: bool,
 	has_mate: bool,
 	score: i64,
@@ -86,6 +88,7 @@ pub(crate) struct Marker {
 	items: VecDeque<Item>,
 	base: u64,
 	decided: usize,
+	groups: HashMap<Vec<u8>, u32>,
 	pairs: HashMap<PairKey, u64>,
 	singles: HashMap<SingleKey, u64>,
 	waiting: HashMap<Vec<u8>, Waiting>,
@@ -95,12 +98,13 @@ pub(crate) struct Marker {
 }
 
 impl Marker {
-	pub(crate) fn new(settings: MarkSettings) -> Self {
+	pub(crate) fn new(settings: MarkSettings, header: &Header) -> Self {
 		Self {
 			settings,
 			items: VecDeque::new(),
 			base: 0,
 			decided: 0,
+			groups: libraries(header),
 			pairs: HashMap::new(),
 			singles: HashMap::new(),
 			waiting: HashMap::new(),
@@ -139,11 +143,19 @@ impl Marker {
 		let has_mate = flags.is_paired()
 			&& !flags.is_mate_unmapped()
 			&& !(mate_contig == -1 && mate_position == -1);
+		let library = record
+			.tags()
+			.get(*b"RG")
+			.ok()
+			.flatten()
+			.and_then(|value| self.groups.get(value.as_string()?).copied())
+			.unwrap_or(0);
 		let mut item = Item {
 			bytes: bytes.to_vec(),
 			contig,
 			position,
 			pos: i64::from(position),
+			library,
 			examined,
 			has_mate,
 			score: 0,
@@ -160,7 +172,12 @@ impl Marker {
 			item.score = score(record);
 			item.extent = extent(record);
 			if has_mate {
-				item.mate = self.resolve(record, &item, i64::from(mate_position));
+				item.mate = self.resolve(
+					record,
+					&item,
+					i64::from(mate_position),
+					mate_contig != contig,
+				);
 			}
 		}
 		self.latest = (contig, position);
@@ -180,7 +197,13 @@ impl Marker {
 		Ok(self.stats)
 	}
 
-	fn resolve(&mut self, record: RecordRef<'_>, item: &Item, mate_position: i64) -> MateState {
+	fn resolve(
+		&mut self,
+		record: RecordRef<'_>,
+		item: &Item,
+		mate_position: i64,
+		other_contig: bool,
+	) -> MateState {
 		let tags = record.tags();
 		let text = tags.get(*b"MC").ok().flatten();
 		let mate_score = tags.get(*b"ms").ok().flatten();
@@ -192,6 +215,10 @@ impl Marker {
 				extent: mate_extent(mate_position, text),
 				score: mate_score,
 			});
+		}
+		if other_contig {
+			self.stats.unmatched += 1;
+			return MateState::Missing;
 		}
 		let own = Mate {
 			extent: item.extent,
@@ -287,15 +314,23 @@ impl Marker {
 		let seq = self.base + index as u64;
 		let record = RecordRef::new(&item.bytes)?;
 		let flags = record.flags();
-		let contig = item.contig + 1;
-		let single = single_key(contig, flags, item.extent);
+		let library = item.library;
+		let contig = i64::from(item.contig) + 1;
+		let single = single_key(library, contig, flags, item.extent);
 		let mate_contig = record
 			.mate_contig()
-			.map_or(-1, |contig| contig.get().cast_signed())
+			.map_or(-1, |contig| i64::from(contig.get().cast_signed()))
 			+ 1;
 		let paired = match item.mate {
 			MateState::Known(mate) => Some((
-				pair_key(contig, mate_contig, flags, item.extent, mate.extent),
+				pair_key(
+					library,
+					contig,
+					mate_contig,
+					flags,
+					item.extent,
+					mate.extent,
+				),
 				item.score + mate.score,
 			)),
 			_ => None,
@@ -418,6 +453,24 @@ fn score(record: RecordRef<'_>) -> i64 {
 		.filter(|&&quality| quality >= MIN_QUALITY)
 		.map(|&quality| i64::from(quality))
 		.sum()
+}
+
+fn libraries(header: &Header) -> HashMap<Vec<u8>, u32> {
+	let mut names: HashMap<&str, u32> = HashMap::new();
+	let mut groups = HashMap::new();
+	for line in header.lines() {
+		if let Line::ReadGroup(fields) = line {
+			let next = u32::try_from(names.len() + 1).unwrap_or(u32::MAX);
+			let library = *names
+				.entry(fields.get(*b"LB").unwrap_or_default())
+				.or_insert(next);
+			groups.insert(
+				fields.get(*b"ID").unwrap_or_default().as_bytes().to_vec(),
+				library,
+			);
+		}
+	}
+	groups
 }
 
 fn is_duplicate(bytes: &[u8]) -> bool {

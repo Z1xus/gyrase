@@ -58,7 +58,7 @@ impl<'a, T: Element> Elements<'a, T> {
 	}
 
 	pub fn get(&self, index: usize) -> Option<T> {
-		T::read(self.bytes.get(index * T::WIDTH..)?)
+		T::read(self.bytes.get(index.checked_mul(T::WIDTH)?..)?)
 	}
 
 	pub fn iter(&self) -> impl Iterator<Item = T> + 'a {

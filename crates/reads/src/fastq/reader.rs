@@ -13,6 +13,12 @@ pub struct FastqReader<R: BufRead> {
 	records_read: u64,
 }
 
+enum Refill {
+	More,
+	Done,
+	Full,
+}
+
 struct Lines {
 	header_end: usize,
 	bases_end: usize,
@@ -35,6 +41,32 @@ impl<R: BufRead> FastqReader<R> {
 		max_records: usize,
 	) -> Result<usize, Error> {
 		batch.restart();
+		self.fill(batch, max_records, MAX_BATCH_BYTES)
+	}
+
+	pub(super) fn read_records(
+		&mut self,
+		batch: &mut FastqBatch,
+		records: usize,
+	) -> Result<usize, Error> {
+		batch.restart();
+		self.fill(batch, records, usize::MAX)
+	}
+
+	pub(super) fn read_more(
+		&mut self,
+		batch: &mut FastqBatch,
+		records: usize,
+	) -> Result<usize, Error> {
+		self.fill(batch, records, usize::MAX)
+	}
+
+	fn fill(
+		&mut self,
+		batch: &mut FastqBatch,
+		max_records: usize,
+		max_bytes: usize,
+	) -> Result<usize, Error> {
 		let mut source_done = false;
 		while batch.len() < max_records {
 			let record = self.records_read + 1;
@@ -54,27 +86,34 @@ impl<R: BufRead> FastqReader<R> {
 					}
 					break;
 				}
-				None => source_done = self.refill(batch)?,
+				None => match self.refill(batch, max_bytes)? {
+					Refill::More => {}
+					Refill::Done => source_done = true,
+					Refill::Full => break,
+				},
 			}
 		}
 		Ok(batch.len())
 	}
 
-	fn refill(&mut self, batch: &mut FastqBatch) -> Result<bool, Error> {
+	fn refill(&mut self, batch: &mut FastqBatch, max_bytes: usize) -> Result<Refill, Error> {
 		let chunk = self.source.fill_buf()?;
 		if chunk.is_empty() {
-			return Ok(true);
+			return Ok(Refill::Done);
 		}
-		if batch.data.len() + chunk.len() > MAX_BATCH_BYTES {
-			return Err(FastqError::RecordTooLarge {
-				record: self.records_read + 1,
+		if batch.data.len().saturating_add(chunk.len()) > max_bytes {
+			if batch.is_empty() {
+				return Err(FastqError::RecordTooLarge {
+					record: self.records_read + 1,
+				}
+				.into());
 			}
-			.into());
+			return Ok(Refill::Full);
 		}
 		batch.data.extend_from_slice(chunk);
 		let taken = chunk.len();
 		self.source.consume(taken);
-		Ok(false)
+		Ok(Refill::More)
 	}
 }
 

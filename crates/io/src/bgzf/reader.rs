@@ -2,13 +2,13 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::fs::File;
 use std::io::{BufReader, ErrorKind, Read, Seek, SeekFrom};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
-use crossbeam_channel::{Receiver, Sender, bounded};
+use crossbeam_channel::{Receiver, Sender, bounded, never};
 use libdeflater::Decompressor;
 use rayon::prelude::*;
 
-use super::block::{Block, FIXED_HEADER_LEN, Frame, block_len, extra_len};
+use super::block::{Block, FIXED_HEADER_LEN, Frame, block_len, extra_len, has_magic};
 use crate::{Error, Workers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +55,7 @@ impl fmt::Debug for Input {
 pub struct BlockReader {
 	batches: Receiver<Result<Vec<Block>, Error>>,
 	ready: VecDeque<Block>,
+	threads: Vec<JoinHandle<()>>,
 }
 
 impl BlockReader {
@@ -65,12 +66,13 @@ impl BlockReader {
 	pub fn with_readahead(input: Input, workers: &Workers, readahead: Readahead) -> Self {
 		let (frames_out, frames_in) = bounded(readahead.batches);
 		let (blocks_out, blocks_in) = bounded(readahead.batches);
-		thread::spawn(move || scan(input, &frames_out, readahead));
+		let scanner = thread::spawn(move || scan(input, &frames_out, readahead));
 		let workers = workers.clone();
-		thread::spawn(move || inflate(&frames_in, &blocks_out, &workers));
+		let inflater = thread::spawn(move || inflate(&frames_in, &blocks_out, &workers));
 		Self {
 			batches: blocks_in,
 			ready: VecDeque::new(),
+			threads: vec![scanner, inflater],
 		}
 	}
 
@@ -90,6 +92,15 @@ impl BlockReader {
 				Ok(batch) => self.ready.extend(batch),
 				Err(error) => return Some(Err(error)),
 			}
+		}
+	}
+}
+
+impl Drop for BlockReader {
+	fn drop(&mut self) {
+		self.batches = never();
+		for thread in self.threads.drain(..) {
+			let _ = thread.join();
 		}
 	}
 }
@@ -169,6 +180,9 @@ fn read_frame(stream: &mut impl Read, offset: u64) -> Result<Option<Frame>, Erro
 	let mut header = [0; FIXED_HEADER_LEN];
 	if !fill(stream, &mut header, offset)? {
 		return Ok(None);
+	}
+	if !has_magic(&header) {
+		return Err(Error::NotBgzf { offset });
 	}
 	let extra = extra_len(&header);
 	let mut bytes = Vec::with_capacity(FIXED_HEADER_LEN + extra);

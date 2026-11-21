@@ -12,6 +12,7 @@ const LENGTH_PREFIX: usize = 4;
 const CONTIG: usize = 0;
 const POSITION: usize = 4;
 const FLAGS: usize = 14;
+const UNPLACED: u64 = u64::MAX;
 
 #[derive(Debug, Clone, Copy)]
 struct Slot {
@@ -28,9 +29,12 @@ pub(super) struct Buffer {
 }
 
 pub(super) fn key(core: &[u8]) -> u64 {
-	let contig = u64::from(u32_le(core, CONTIG).unwrap_or(u32::MAX));
-	let position =
-		u64::from(i32_le(core, POSITION).map_or(0, |at| at.wrapping_add(1).cast_unsigned()));
+	let (Some(contig), Some(position)) = (i32_le(core, CONTIG), i32_le(core, POSITION)) else {
+		return UNPLACED;
+	};
+	let (Ok(contig), Ok(position)) = (u64::try_from(contig), u64::try_from(position)) else {
+		return UNPLACED;
+	};
 	let reverse = u64::from(u16_le(core, FLAGS).unwrap_or(0) & Flags::REVERSE.bits() != 0);
 	contig << 32 | position << 1 | reverse
 }

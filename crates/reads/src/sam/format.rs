@@ -6,13 +6,18 @@ use crate::header::Header;
 use crate::record::{Array, Cigar, Element, Elements, Field, RecordRef, Value};
 
 const LONG_CIGAR_TAG: [u8; 2] = *b"CG";
+const MAX_PRINTABLE_PHRED: u8 = 93;
 
 pub(super) fn format_record(
 	out: &mut Vec<u8>,
 	header: &Header,
 	record: RecordRef<'_>,
 ) -> Result<(), RecordError> {
-	out.extend_from_slice(record.name());
+	let name = record.name();
+	if name.is_empty() || name.iter().any(|&byte| byte <= b' ' || byte == 0x7f) {
+		return Err(RecordError::InvalidName);
+	}
+	out.extend_from_slice(name);
 	out.push(b'\t');
 	push_unsigned(out, u64::from(record.flags().bits()));
 	out.push(b'\t');
@@ -40,7 +45,7 @@ pub(super) fn format_record(
 	out.push(b'\t');
 	push_signed(out, i64::from(record.template_length()));
 	out.push(b'\t');
-	push_read(out, record);
+	push_read(out, record)?;
 	push_tags(out, record)
 }
 
@@ -84,20 +89,27 @@ fn push_cigar(out: &mut Vec<u8>, cigar: Cigar<'_>) {
 	}
 }
 
-fn push_read(out: &mut Vec<u8>, record: RecordRef<'_>) {
+fn push_read(out: &mut Vec<u8>, record: RecordRef<'_>) -> Result<(), RecordError> {
 	let sequence = record.sequence();
 	if sequence.is_empty() {
 		out.extend_from_slice(b"*\t*");
-		return;
+		return Ok(());
 	}
 	sequence.decode_into(out);
 	out.push(b'\t');
 	let qualities = record.qualities();
 	if qualities.is_missing() {
 		out.push(b'*');
+	} else if qualities
+		.as_phred()
+		.iter()
+		.any(|&value| value > MAX_PRINTABLE_PHRED)
+	{
+		return Err(RecordError::InvalidQuality);
 	} else {
 		qualities.decode_ascii_into(out);
 	}
+	Ok(())
 }
 
 fn push_tags(out: &mut Vec<u8>, record: RecordRef<'_>) -> Result<(), RecordError> {
@@ -117,10 +129,11 @@ fn push_field(out: &mut Vec<u8>, field: Field<'_>) -> Result<(), RecordError> {
 	out.extend_from_slice(&field.tag);
 	out.push(b':');
 	match field.value {
-		Value::Char(value) => {
+		Value::Char(value) if value.is_ascii_graphic() => {
 			out.extend_from_slice(b"A:");
 			out.push(value);
 		}
+		Value::Char(_) => return Err(RecordError::InvalidTagString),
 		Value::Float(value) => {
 			out.extend_from_slice(b"f:");
 			push_general(out, f64::from(value));

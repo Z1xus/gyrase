@@ -1,11 +1,15 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+use std::path::Path;
+
 use gyrase_io::Workers;
 
 use super::buffer::Buffer;
 use super::run::{RunFile, RunReader};
 use crate::error::Error;
+
+const FAN_IN: usize = 64;
 
 enum Source<'a> {
 	Memory { buffer: &'a Buffer, at: usize },
@@ -38,8 +42,30 @@ impl Source<'_> {
 	}
 }
 
+pub(super) fn collapse(
+	runs: &mut Vec<RunFile>,
+	directory: &Path,
+	workers: &Workers,
+) -> Result<(), Error> {
+	while runs.len() > FAN_IN {
+		let mut pending = std::mem::take(runs).into_iter();
+		let mut next = Vec::new();
+		loop {
+			let group: Vec<RunFile> = pending.by_ref().take(FAN_IN).collect();
+			if group.is_empty() {
+				break;
+			}
+			let mut output = RunFile::create(directory, workers)?;
+			merge(None, &group, workers, |bytes| output.push(bytes))?;
+			next.push(output.finish()?);
+		}
+		*runs = next;
+	}
+	Ok(())
+}
+
 pub(super) fn merge(
-	buffer: &Buffer,
+	buffer: Option<&Buffer>,
 	runs: &[RunFile],
 	workers: &Workers,
 	mut emit: impl FnMut(&[u8]) -> Result<(), Error>,
@@ -53,7 +79,7 @@ pub(super) fn merge(
 			sources.push(Source::File(reader));
 		}
 	}
-	if buffer.len() > 0 {
+	if let Some(buffer) = buffer.filter(|buffer| buffer.len() > 0) {
 		let source = Source::Memory { buffer, at: 0 };
 		heap.push(Reverse((source.key(), sources.len())));
 		sources.push(source);

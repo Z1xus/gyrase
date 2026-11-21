@@ -19,8 +19,6 @@ pub enum Error {
 	#[error(transparent)]
 	Fastq(#[from] FastqError),
 	#[error(transparent)]
-	Stats(#[from] StatsError),
-	#[error(transparent)]
 	Index(#[from] gyrase_index::Error),
 	#[error(transparent)]
 	Sort(#[from] SortError),
@@ -70,8 +68,6 @@ pub enum RecordError {
 	MalformedTag,
 	#[error("read name is longer than 254 bytes or contains a NUL")]
 	NameTooLong,
-	#[error("cigar has more than 65535 operations")]
-	CigarTooLong,
 	#[error("cigar operation length is too large")]
 	CigarLengthTooLarge,
 	#[error("qualities and bases differ in length")]
@@ -150,12 +146,6 @@ pub enum FastqError {
 	PairCount,
 	#[error("record {record} is larger than the batch limit")]
 	RecordTooLarge { record: u64 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum StatsError {
-	#[error("file is not position sorted")]
-	NotSorted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

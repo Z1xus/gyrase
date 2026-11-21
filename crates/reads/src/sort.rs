@@ -77,7 +77,7 @@ impl<'w> Sorter<'w> {
 		level: Level,
 		settings: MarkSettings,
 	) -> Result<(Sorted<W>, MarkStats), Error> {
-		let (sorted, stats) = self.write(output, level, Some(Marker::new(settings)))?;
+		let (sorted, stats) = self.write(output, level, Some(settings))?;
 		Ok((sorted, stats.unwrap_or_default()))
 	}
 
@@ -85,14 +85,16 @@ impl<'w> Sorter<'w> {
 		mut self,
 		output: W,
 		level: Level,
-		mut marker: Option<Marker>,
+		settings: Option<MarkSettings>,
 	) -> Result<(Sorted<W>, Option<MarkStats>), Error> {
 		self.buffer.sort(self.workers);
+		merge::collapse(&mut self.runs, &self.directory, self.workers)?;
 		let (format, geometry) = index_layout(&self.header)?;
+		let mut marker = settings.map(|settings| Marker::new(settings, &self.header));
 		let mut writer = IndexedWriter::new(output, &self.header, geometry, level, self.workers)?;
 		let mut emit = |bytes: &[u8]| writer.write(RecordRef::new(bytes)?);
 		merge::merge(
-			&self.buffer,
+			Some(&self.buffer),
 			&self.runs,
 			self.workers,
 			|bytes| match marker.as_mut() {

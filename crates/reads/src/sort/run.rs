@@ -22,28 +22,43 @@ impl Drop for RunFile {
 	}
 }
 
+#[derive(Debug)]
+pub(super) struct RunWriter {
+	writer: BgzfWriter<File>,
+	run: RunFile,
+}
+
 impl RunFile {
+	pub(super) fn create(directory: &Path, workers: &Workers) -> Result<RunWriter, Error> {
+		loop {
+			let path = directory.join(format!(
+				"gyrase-sort-{}-{}.bgzf",
+				process::id(),
+				SERIAL.fetch_add(1, Ordering::Relaxed)
+			));
+			match File::options().write(true).create_new(true).open(&path) {
+				Ok(file) => {
+					return Ok(RunWriter {
+						writer: BgzfWriter::new(file, Level::FASTEST, workers),
+						run: Self { path },
+					});
+				}
+				Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+				Err(error) => return Err(error.into()),
+			}
+		}
+	}
+
 	pub(super) fn write(
 		directory: &Path,
 		buffer: &Buffer,
 		workers: &Workers,
 	) -> Result<Self, Error> {
-		let path = directory.join(format!(
-			"gyrase-sort-{}-{}.bgzf",
-			process::id(),
-			SERIAL.fetch_add(1, Ordering::Relaxed)
-		));
-		let file = File::options().write(true).create_new(true).open(&path)?;
-		let run = Self { path };
-		let mut writer = BgzfWriter::new(file, Level::FASTEST, workers);
+		let mut run = Self::create(directory, workers)?;
 		for index in 0..buffer.len() {
-			let record = buffer.record_at(index).unwrap_or_default();
-			let len = u32::try_from(record.len()).unwrap_or(u32::MAX);
-			writer.write_all(&len.to_le_bytes())?;
-			writer.write_all(record)?;
+			run.push(buffer.record_at(index).unwrap_or_default())?;
 		}
-		writer.finish()?;
-		Ok(run)
+		run.finish()
 	}
 
 	pub(super) fn open(&self, workers: &Workers) -> Result<RunReader, Error> {
@@ -57,6 +72,20 @@ impl RunFile {
 			record: Vec::new(),
 			key: 0,
 		})
+	}
+}
+
+impl RunWriter {
+	pub(super) fn push(&mut self, record: &[u8]) -> Result<(), Error> {
+		let len = u32::try_from(record.len()).unwrap_or(u32::MAX);
+		self.writer.write_all(&len.to_le_bytes())?;
+		self.writer.write_all(record)?;
+		Ok(())
+	}
+
+	pub(super) fn finish(self) -> Result<RunFile, Error> {
+		self.writer.finish()?;
+		Ok(self.run)
 	}
 }
 

@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use gyrase_genome::{Code4, ContigId};
 
 use super::bin::region_bin;
-use super::cigar::{CigarOp, MAX_OP_LEN};
+use super::cigar::{CigarKind, CigarOp, MAX_OP_LEN};
 use super::fixed::{self, CORE_LEN, Core, Layout};
 use super::flags::Flags;
 use super::tags::{Element, Value};
@@ -11,8 +11,10 @@ use super::view::RecordRef;
 use crate::error::RecordError;
 
 const MAX_NAME_LEN: usize = 254;
+const LONG_CIGAR_TAG: [u8; 2] = *b"CG";
 const MISSING_QUALITY: u8 = 0xff;
 const ASCII_QUALITY_OFFSET: u8 = 33;
+const ASCII_QUALITY_MAX: u8 = 126;
 
 #[derive(Debug, Clone, Copy)]
 pub enum QualityInput<'a> {
@@ -89,6 +91,9 @@ impl Record {
 	}
 
 	pub fn set_name(&mut self, name: &[u8]) -> Result<(), RecordError> {
+		if name.is_empty() {
+			return Err(RecordError::InvalidName);
+		}
 		if name.len() > MAX_NAME_LEN || name.contains(&0) {
 			return Err(RecordError::NameTooLong);
 		}
@@ -139,7 +144,9 @@ impl Record {
 	}
 
 	pub fn set_cigar(&mut self, ops: &[CigarOp]) -> Result<(), RecordError> {
-		let count = u16::try_from(ops.len()).map_err(|_| RecordError::CigarTooLong)?;
+		let Ok(count) = u16::try_from(ops.len()) else {
+			return self.set_long_cigar(ops);
+		};
 		if ops.iter().any(|op| op.len() > MAX_OP_LEN) {
 			return Err(RecordError::CigarLengthTooLarge);
 		}
@@ -154,6 +161,31 @@ impl Record {
 			self.layout.seq_len,
 		)?;
 		self.refresh_bin();
+		Ok(())
+	}
+
+	fn set_long_cigar(&mut self, ops: &[CigarOp]) -> Result<(), RecordError> {
+		let reference: u64 = ops
+			.iter()
+			.filter(|op| op.kind().consumes_reference())
+			.map(|op| u64::from(op.len()))
+			.sum();
+		let placeholder = [
+			u32::try_from(self.layout.seq_len)
+				.ok()
+				.and_then(|len| CigarOp::new(len, CigarKind::SoftClip)),
+			u32::try_from(reference)
+				.ok()
+				.and_then(|len| CigarOp::new(len, CigarKind::Skip)),
+		];
+		let [Some(clip), Some(skip)] = placeholder else {
+			return Err(RecordError::CigarLengthTooLarge);
+		};
+		self.set_cigar(&[clip, skip])?;
+		let mut array = self.begin_array::<u32>(LONG_CIGAR_TAG);
+		for op in ops {
+			array.push(op.raw())?;
+		}
 		Ok(())
 	}
 
@@ -294,7 +326,7 @@ fn check_qualities(len: usize, qualities: QualityInput<'_>) -> Result<(), Record
 		QualityInput::Phred(values) if values.len() == len => Ok(()),
 		QualityInput::Ascii(values) if values.len() == len => values
 			.iter()
-			.all(|&value| value >= ASCII_QUALITY_OFFSET)
+			.all(|&value| (ASCII_QUALITY_OFFSET..=ASCII_QUALITY_MAX).contains(&value))
 			.then_some(())
 			.ok_or(RecordError::InvalidQuality),
 		_ => Err(RecordError::LengthMismatch),

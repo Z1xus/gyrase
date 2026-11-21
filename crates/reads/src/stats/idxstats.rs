@@ -1,23 +1,14 @@
 use std::fmt::Write;
 
-use gyrase_genome::ContigId;
-
 use crate::bam::BamReader;
-use crate::error::{Error, RecordError, StatsError};
+use crate::error::{Error, RecordError};
 use crate::header::Header;
 use crate::record::RecordRef;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Last {
-	Start,
-	At(Option<ContigId>),
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Idxstats {
 	placed: Vec<[u64; 2]>,
 	unplaced: [u64; 2],
-	last: Last,
 }
 
 impl Idxstats {
@@ -25,7 +16,6 @@ impl Idxstats {
 		Self {
 			placed: vec![[0; 2]; reference_count],
 			unplaced: [0; 2],
-			last: Last::Start,
 		}
 	}
 
@@ -39,13 +29,9 @@ impl Idxstats {
 				.ok_or(RecordError::ContigOutOfRange { contig: id.get() })?,
 			None => &mut self.unplaced,
 		};
-		if self.last != Last::At(contig) && self.last != Last::Start && counts[0] + counts[1] > 0 {
-			return Err(StatsError::NotSorted.into());
-		}
 		if let Some(slot) = counts.get_mut(class) {
 			*slot += 1;
 		}
-		self.last = Last::At(contig);
 		Ok(())
 	}
 

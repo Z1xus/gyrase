@@ -21,10 +21,16 @@ pub struct BgzfWriter<W: Write + Send + 'static> {
 	payload: Vec<u8>,
 	batch: Vec<Vec<u8>>,
 	ordinal: u64,
-	batches: Sender<Vec<Vec<u8>>>,
+	commands: Sender<Command>,
 	completed: Receiver<Vec<u64>>,
 	offsets: Vec<u64>,
-	compressor: JoinHandle<Result<Finished<W>, Error>>,
+	compressor: Option<JoinHandle<Result<Finished<W>, Error>>>,
+}
+
+#[derive(Debug)]
+enum Command {
+	Blocks(Vec<Vec<u8>>),
+	Finish,
 }
 
 #[derive(Debug)]
@@ -45,7 +51,7 @@ impl<W> Finished<W> {
 
 impl<W: Write + Send + 'static> BgzfWriter<W> {
 	pub fn new(inner: W, level: Level, workers: &Workers) -> Self {
-		let (batches, received) = bounded(BATCHES_IN_FLIGHT);
+		let (commands, received) = bounded(BATCHES_IN_FLIGHT);
 		let (reported, completed) = unbounded();
 		let workers = workers.clone();
 		let compressor =
@@ -54,10 +60,10 @@ impl<W: Write + Send + 'static> BgzfWriter<W> {
 			payload: Vec::with_capacity(MAX_PAYLOAD_LEN),
 			batch: Vec::with_capacity(BLOCKS_PER_BATCH),
 			ordinal: 0,
-			batches,
+			commands,
 			completed,
 			offsets: Vec::new(),
-			compressor,
+			compressor: Some(compressor),
 		}
 	}
 
@@ -98,8 +104,8 @@ impl<W: Write + Send + 'static> BgzfWriter<W> {
 	pub fn finish(mut self) -> Result<Finished<W>, Error> {
 		self.end_block()?;
 		self.send_batch()?;
-		drop(self.batches);
-		self.compressor.join().map_err(|_| Error::Disconnected)?
+		self.send(Command::Finish)?;
+		self.join()
 	}
 
 	fn send_batch(&mut self) -> Result<(), Error> {
@@ -107,7 +113,30 @@ impl<W: Write + Send + 'static> BgzfWriter<W> {
 			return Ok(());
 		}
 		let batch = std::mem::replace(&mut self.batch, Vec::with_capacity(BLOCKS_PER_BATCH));
-		self.batches.send(batch).map_err(|_| Error::Disconnected)
+		self.send(Command::Blocks(batch))
+	}
+
+	fn send(&mut self, command: Command) -> Result<(), Error> {
+		match self.commands.send(command) {
+			Ok(()) => Ok(()),
+			Err(_) => Err(self.join().err().unwrap_or(Error::Disconnected)),
+		}
+	}
+
+	fn join(&mut self) -> Result<Finished<W>, Error> {
+		self.compressor
+			.take()
+			.ok_or(Error::Disconnected)?
+			.join()
+			.map_err(|_| Error::Disconnected)?
+	}
+}
+
+impl<W: Write + Send + 'static> Drop for BgzfWriter<W> {
+	fn drop(&mut self) {
+		let (abandoned, _) = bounded(0);
+		drop(std::mem::replace(&mut self.commands, abandoned));
+		let _ = self.join();
 	}
 }
 
@@ -129,13 +158,18 @@ impl<W: Write + Send + 'static> Write for BgzfWriter<W> {
 fn compress<W: Write>(
 	mut inner: W,
 	level: Level,
-	batches: &Receiver<Vec<Vec<u8>>>,
+	commands: &Receiver<Command>,
 	reported: &Sender<Vec<u64>>,
 	workers: &Workers,
 ) -> Result<Finished<W>, Error> {
 	let mut block_offsets = Vec::new();
 	let mut offset = 0u64;
-	for batch in batches {
+	loop {
+		let batch = match commands.recv() {
+			Ok(Command::Blocks(batch)) => batch,
+			Ok(Command::Finish) => break,
+			Err(_) => return Err(Error::Disconnected),
+		};
 		let blocks = workers.install(|| {
 			batch
 				.par_iter()

@@ -9,16 +9,18 @@ const RIGHT: u8 = 13;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct SingleKey {
-	contig: i32,
+	library: u32,
+	contig: i64,
 	coord: i64,
 	orientation: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct PairKey {
-	contig: i32,
+	library: u32,
+	contig: i64,
 	coord: i64,
-	mate_contig: i32,
+	mate_contig: i64,
 	mate_coord: i64,
 	leftmost: u8,
 	orientation: u8,
@@ -78,15 +80,17 @@ pub(super) fn mate_extent(position: i64, cigar: &[u8]) -> Extent {
 	}
 }
 
-pub(super) fn single_key(contig: i32, flags: Flags, extent: Extent) -> SingleKey {
+pub(super) fn single_key(library: u32, contig: i64, flags: Flags, extent: Extent) -> SingleKey {
 	if flags.is_reverse() {
 		SingleKey {
+			library,
 			contig,
 			coord: extent.end,
 			orientation: RR,
 		}
 	} else {
 		SingleKey {
+			library,
 			contig,
 			coord: extent.start,
 			orientation: FF,
@@ -95,8 +99,9 @@ pub(super) fn single_key(contig: i32, flags: Flags, extent: Extent) -> SingleKey
 }
 
 pub(super) fn pair_key(
-	contig: i32,
-	mate_contig: i32,
+	library: u32,
+	contig: i64,
+	mate_contig: i64,
 	flags: Flags,
 	this: Extent,
 	mate: Extent,
@@ -126,6 +131,7 @@ pub(super) fn pair_key(
 		(false, false) => (this.end, mate.start, FR),
 	};
 	PairKey {
+		library,
 		contig,
 		coord,
 		mate_contig,

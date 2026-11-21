@@ -15,8 +15,7 @@ pub use bam::{
 	index_layout,
 };
 pub use error::{
-	BamError, Error, FastqError, HeaderError, MarkError, RecordError, SamError, SamField,
-	SortError, StatsError,
+	BamError, Error, FastqError, HeaderError, MarkError, RecordError, SamError, SamField, SortError,
 };
 pub use fastq::{
 	FastqBatch, FastqReader, InterleavedFastq, PairedBatch, PairedFastq, ReadPair, ReadRef,

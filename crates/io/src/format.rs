@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Chain, Cursor, ErrorKind, Read};
 
 use flate2::bufread::MultiGzDecoder;
 
@@ -15,7 +15,7 @@ pub enum Compression {
 	Bgzf,
 }
 
-type Source = BufReader<Box<dyn Read + Send>>;
+type Source = BufReader<Chain<Cursor<Vec<u8>>, Box<dyn Read + Send>>>;
 
 pub enum Decoded {
 	Plain(Source),
@@ -51,9 +51,27 @@ fn compression_of(head: &[u8]) -> Compression {
 	}
 }
 
+type Sniffed<R> = (Compression, Chain<Cursor<Vec<u8>>, R>);
+
+fn sniff<R: Read>(mut source: R) -> Result<Sniffed<R>, Error> {
+	let mut head = vec![0; PEEK_LEN];
+	let mut filled = 0;
+	while filled < PEEK_LEN {
+		match source.read(head.get_mut(filled..).unwrap_or_default()) {
+			Ok(0) => break,
+			Ok(read) => filled += read,
+			Err(error) if error.kind() == ErrorKind::Interrupted => {}
+			Err(error) => return Err(error.into()),
+		}
+	}
+	head.truncate(filled);
+	let compression = compression_of(&head);
+	Ok((compression, Cursor::new(head).chain(source)))
+}
+
 pub fn peek(source: impl Read, limit: u64) -> Result<(Compression, Vec<u8>), Error> {
-	let mut buffered = BufReader::new(source);
-	let compression = compression_of(buffered.fill_buf()?);
+	let (compression, chained) = sniff(source)?;
+	let buffered = BufReader::new(chained);
 	let mut head = Vec::new();
 	match compression {
 		Compression::None => buffered.take(limit).read_to_end(&mut head)?,
@@ -65,8 +83,8 @@ pub fn peek(source: impl Read, limit: u64) -> Result<(Compression, Vec<u8>), Err
 }
 
 pub fn decode(source: Box<dyn Read + Send>, workers: &Workers) -> Result<Decoded, Error> {
-	let mut buffered = BufReader::with_capacity(1 << 20, source);
-	let compression = compression_of(buffered.fill_buf()?);
+	let (compression, chained) = sniff(source)?;
+	let buffered = BufReader::with_capacity(1 << 20, chained);
 	Ok(match compression {
 		Compression::None => Decoded::Plain(buffered),
 		Compression::Gzip => Decoded::Gzip(Box::new(BufReader::with_capacity(

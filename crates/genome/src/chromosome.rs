@@ -40,7 +40,7 @@ impl Chromosome {
 
 	pub fn index(self) -> usize {
 		usize::from(match self {
-			Self::Autosome(number) => number - 1,
+			Self::Autosome(number) => number.clamp(1, AUTOSOMES) - 1,
 			Self::X => AUTOSOMES,
 			Self::Y => AUTOSOMES + 1,
 			Self::Mitochondrion => AUTOSOMES + 2,
