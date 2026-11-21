@@ -460,10 +460,13 @@ fn libraries(header: &Header) -> HashMap<Vec<u8>, u32> {
 	let mut groups = HashMap::new();
 	for line in header.lines() {
 		if let Line::ReadGroup(fields) = line {
-			let next = u32::try_from(names.len() + 1).unwrap_or(u32::MAX);
-			let library = *names
-				.entry(fields.get(*b"LB").unwrap_or_default())
-				.or_insert(next);
+			let library = match fields.get(*b"LB").filter(|name| !name.is_empty()) {
+				Some(name) => {
+					let next = u32::try_from(names.len() + 1).unwrap_or(u32::MAX);
+					*names.entry(name).or_insert(next)
+				}
+				None => 0,
+			};
 			groups.insert(
 				fields.get(*b"ID").unwrap_or_default().as_bytes().to_vec(),
 				library,
