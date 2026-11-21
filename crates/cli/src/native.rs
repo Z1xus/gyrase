@@ -21,7 +21,6 @@ Options:
   -o, --output DIR     write files to DIR [next to the input]
   -f, --formats LIST   23andme,ancestry,ftdna,myheritage,livingdna or none [all]
   -b, --bam            also write a BAM file from FASTQ input
-      --no-gpu         do not use the graphics card
   -h, --help           show this help
 ";
 
