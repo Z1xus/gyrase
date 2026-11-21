@@ -323,6 +323,7 @@ impl Plan {
 		report: &mut impl FnMut(Progress),
 	) -> Result<(Alignments, Option<Scratch>), Error> {
 		let output = path.map_or_else(|| self.scratch(), Path::to_owned);
+		let guard = path.is_none().then(|| Scratch(output.clone()));
 		let (header, held) = self.align(
 			lanes,
 			&output,
@@ -337,7 +338,6 @@ impl Plan {
 		match held {
 			Output::Memory(records) => Ok((Alignments::held(header, reference, records), None)),
 			Output::File => {
-				let guard = path.is_none().then(|| Scratch(output.clone()));
 				let alignments = Alignments::open(&Input::open(&output)?, reference, &pools.io)?;
 				Ok((alignments, guard))
 			}
@@ -398,7 +398,11 @@ impl Plan {
 			.as_deref()
 			.and_then(Path::parent)
 			.unwrap_or(Path::new("."));
-		folder.join(format!("{}.tmp.bam", self.sample.name))
+		folder.join(format!(
+			"{}.{}.tmp.bam",
+			self.sample.name,
+			std::process::id()
+		))
 	}
 
 	fn reference(
