@@ -75,11 +75,24 @@ impl<'a> Aligner<'a> {
 	}
 
 	pub fn align_reads(&self, reads: &[Read<'_>]) -> Result<AlignedBatch, Error> {
+		Ok(merge(self.align_reads_each(
+			reads,
+			|| (),
+			|(), part| part,
+		)?))
+	}
+
+	pub fn align_reads_each<S, T: Send>(
+		&self,
+		reads: &[Read<'_>],
+		init: impl Fn() -> S + Sync,
+		each: impl Fn(&mut S, AlignedBatch) -> T + Sync,
+	) -> Result<Vec<T>, Error> {
 		for (index, read) in reads.iter().enumerate() {
 			read.validate(index)?;
 		}
 		let sequences: Vec<&[u8]> = reads.iter().map(|read| read.sequence).collect();
-		Ok(self.run(&sequences, 1, Layout::Single))
+		Ok(self.run(&sequences, 1, Layout::Single, init, each))
 	}
 
 	pub fn align_pairs(&self, pairs: &[ReadPair<'_>]) -> Result<AlignedBatch, Error> {
@@ -97,8 +110,23 @@ impl<'a> Aligner<'a> {
 		sizes: &InsertSizes,
 		pairs: &[ReadPair<'_>],
 	) -> Result<AlignedBatch, Error> {
+		Ok(merge(self.align_pairs_each(
+			sizes,
+			pairs,
+			|| (),
+			|(), part| part,
+		)?))
+	}
+
+	pub fn align_pairs_each<S, T: Send>(
+		&self,
+		sizes: &InsertSizes,
+		pairs: &[ReadPair<'_>],
+		init: impl Fn() -> S + Sync,
+		each: impl Fn(&mut S, AlignedBatch) -> T + Sync,
+	) -> Result<Vec<T>, Error> {
 		let sequences = pair_sequences(pairs)?;
-		Ok(self.run(&sequences, 2, Layout::Paired(&sizes.0)))
+		Ok(self.run(&sequences, 2, Layout::Paired(&sizes.0), init, each))
 	}
 
 	fn estimate_insert_model(&self, sequences: &[&[u8]]) -> InsertModel {
@@ -123,27 +151,37 @@ impl<'a> Aligner<'a> {
 		InsertModel::estimate(&mut distances)
 	}
 
-	fn run(&self, sequences: &[&[u8]], ends: usize, layout: Layout<'_>) -> AlignedBatch {
+	fn run<S, T: Send>(
+		&self,
+		sequences: &[&[u8]],
+		ends: usize,
+		layout: Layout<'_>,
+		init: impl Fn() -> S + Sync,
+		each: impl Fn(&mut S, AlignedBatch) -> T + Sync,
+	) -> Vec<T> {
 		let chunk = ends * self.config.chunk_reads.max(1);
-		let parts: Vec<AlignedBatch> = self.workers.install(|| {
+		self.workers.install(|| {
 			sequences
 				.par_chunks(chunk)
 				.enumerate()
 				.map_init(
-					|| Worker::new(self.index, self.config),
-					|worker, (number, part)| {
+					|| (Worker::new(self.index, self.config), init()),
+					|(worker, state), (number, part)| {
 						let mut out = AlignedBatch::default();
 						let first_read = u32_of(number * self.config.chunk_reads.max(1));
 						worker.align(part, layout, first_read, &mut out);
-						out
+						each(state, out)
 					},
 				)
 				.collect()
-		});
-		let mut merged = AlignedBatch::default();
-		for part in parts {
-			merged.absorb(part);
-		}
-		merged
+		})
 	}
+}
+
+fn merge(parts: Vec<AlignedBatch>) -> AlignedBatch {
+	let mut merged = AlignedBatch::default();
+	for part in parts {
+		merged.absorb(part);
+	}
+	merged
 }

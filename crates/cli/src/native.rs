@@ -20,6 +20,7 @@ Usage: gyr <file>... [options]
 Options:
   -o, --output DIR     write files to DIR [next to the input]
   -f, --formats LIST   23andme,ancestry,ftdna,myheritage,livingdna or none [all]
+  -b, --bam            also write a BAM file from FASTQ input
   -h, --help           show this help
 ";
 
@@ -46,11 +47,13 @@ fn run(args: Vec<OsString>) -> Result<(), Failure> {
 	let mut parser = lexopt::Parser::from_args(args);
 	let mut output = None;
 	let mut formats = Format::ALL.to_vec();
+	let mut bam = false;
 	let mut paths = Vec::new();
 	while let Some(arg) = parser.next()? {
 		match arg {
 			Short('o') | Long("output") => output = Some(PathBuf::from(parser.value()?)),
 			Short('f') | Long("formats") => formats = parse_formats(&parser.value()?.string()?)?,
+			Short('b') | Long("bam") => bam = true,
 			Short('h') | Long("help") => return Err(Failure::Help),
 			Value(value) => paths.push(PathBuf::from(value)),
 			_ => return Err(arg.unexpected().into()),
@@ -85,6 +88,7 @@ fn run(args: Vec<OsString>) -> Result<(), Failure> {
 				&Request {
 					output: folder,
 					formats: formats.clone(),
+					bam,
 				},
 			)
 		})

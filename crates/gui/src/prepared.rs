@@ -51,6 +51,7 @@ impl Prepared {
 		let request = Request {
 			output: output.clone(),
 			formats: formats.clone(),
+			bam: false,
 		};
 		let plan = Plan::new(sample, &store, &request).map_err(|error| message::text(&error))?;
 		Ok(Self {

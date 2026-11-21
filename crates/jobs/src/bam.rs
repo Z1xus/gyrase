@@ -10,7 +10,7 @@ use gyrase_index::{Format, Index};
 use gyrase_io::{Level, Workers, decode};
 use gyrase_reads::cram::{CramBatch, CramReader, index_cram};
 use gyrase_reads::{
-	BamReader, Header, Line, MarkSettings, MarkStats, Record, RecordBatch, SamReader, Sorter,
+	BamReader, Header, Line, MarkSettings, Record, RecordBatch, Records, SamReader, Sorter,
 	index_bam, index_layout,
 };
 
@@ -21,6 +21,8 @@ use crate::{Cancel, Error, Estimate, Input, Kind, Progress, Stage};
 const MIN_SORT_MEMORY: u64 = 256 << 20;
 const MAX_SORT_MEMORY: u64 = 4 << 30;
 const SORT_MEMORY_SHARE: u64 = 4;
+const MAX_HOLD_MEMORY: u64 = 12 << 30;
+const HOLD_MEMORY_SHARE: u64 = 2;
 const COORDINATE: &str = "coordinate";
 const RECORDS_PER_REPORT: u32 = 1 << 16;
 
@@ -33,6 +35,11 @@ pub(crate) fn coordinate_sorted(header: &Header) -> bool {
 
 pub(crate) fn sort_budget(memory: u64) -> usize {
 	usize::try_from((memory / SORT_MEMORY_SHARE).clamp(MIN_SORT_MEMORY, MAX_SORT_MEMORY))
+		.unwrap_or(usize::MAX)
+}
+
+pub(crate) fn hold_budget(memory: u64) -> usize {
+	usize::try_from((memory / HOLD_MEMORY_SHARE).clamp(MIN_SORT_MEMORY, MAX_HOLD_MEMORY))
 		.unwrap_or(usize::MAX)
 }
 
@@ -59,6 +66,18 @@ pub(crate) fn index(
 	let (format, geometry) = index_layout(reader.header())?;
 	let index = index_bam(&mut reader, geometry, advance)?;
 	write_index(&index, format, &input.path, workers)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Mode {
+	Sort,
+	Mark(MarkSettings),
+	Hold(MarkSettings),
+}
+
+pub(crate) enum Output {
+	File,
+	Memory(Records),
 }
 
 pub(crate) struct Sorting<'a> {
@@ -153,7 +172,7 @@ impl Sorting<'_> {
 			header,
 			output,
 			self.budget,
-			None,
+			Mode::Sort,
 			self.workers,
 			self.cancel,
 			feed,
@@ -166,11 +185,11 @@ pub(crate) fn write_sorted(
 	header: &Header,
 	output: &Path,
 	budget: usize,
-	marking: Option<MarkSettings>,
+	mode: Mode,
 	workers: &Workers,
 	cancel: &Cancel,
 	feed: impl FnOnce(&mut Sorter<'_>) -> Result<(), Error>,
-) -> Result<Option<MarkStats>, Error> {
+) -> Result<Output, Error> {
 	let directory = output
 		.parent()
 		.filter(|parent| !parent.as_os_str().is_empty())
@@ -179,21 +198,29 @@ pub(crate) fn write_sorted(
 	let loaded = feed(&mut sorter);
 	cancel.check()?;
 	loaded?;
+	if let Mode::Hold(settings) = mode {
+		match sorter.finish_records(settings) {
+			Ok(Ok((records, _))) => return Ok(Output::Memory(records)),
+			Ok(Err(spilled)) => sorter = spilled,
+			Err(error) => {
+				cancel.check()?;
+				return Err(error.into());
+			}
+		}
+	}
 	let (partial, sink) = Partial::create(output)?;
-	let finished = match marking {
-		Some(settings) => sorter
+	let finished = match mode {
+		Mode::Mark(settings) | Mode::Hold(settings) => sorter
 			.finish_marking(sink, Level::DEFAULT, settings)
-			.map(|(written, stats)| (written, Some(stats))),
-		None => sorter
-			.finish(sink, Level::DEFAULT)
-			.map(|written| (written, None)),
+			.map(|(written, _)| written),
+		Mode::Sort => sorter.finish(sink, Level::DEFAULT),
 	};
 	cancel.check()?;
-	let (written, stats) = finished?;
+	let written = finished?;
 	drop(written.output);
 	partial.commit()?;
 	write_index(&written.index, written.format, output, workers)?;
-	Ok(stats)
+	Ok(Output::File)
 }
 
 fn write_index(index: &Index, format: Format, bam: &Path, workers: &Workers) -> Result<(), Error> {

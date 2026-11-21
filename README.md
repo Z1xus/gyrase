@@ -10,7 +10,7 @@ gyrase is an all-in-one tool. You do not need [<img src="https://github.com/samt
 
 Inputs and outputs:
 
-- FASTQ: aligns reads to GRCh38 and writes a BAM file, a VCF file and raw genotype files. FASTQ files need a PC with 16 GB of RAM.
+- FASTQ: aligns reads to GRCh38 and writes a VCF file and raw genotype files. Use `gyr --bam` to also write a BAM file. FASTQ files need a PC with 16 GB of RAM.
 - SAM, BAM or CRAM: writes a VCF file. For GRCh37 and GRCh38, gyrase also writes raw genotype files.
 - VCF, gVCF or BCF (GRCh37 or GRCh38): writes raw genotype files.
 

@@ -9,12 +9,13 @@ use gyrase_extract::{
 };
 use gyrase_genome::{Build, Reference};
 use gyrase_io::Workers;
+use gyrase_reads::Header;
 
 use crate::align::{self, Alignment};
 use crate::alignments::{header, indexed};
-use crate::bam::{Sorting, coordinate_sorted, index, sort_budget};
+use crate::bam::{Output, Sorting, coordinate_sorted, hold_budget, index, sort_budget};
 use crate::genotypes;
-use crate::partial::Partial;
+use crate::partial::{Partial, suffixed};
 use crate::{
 	Alignments, Calling, Cancel, Error, Estimate, Input, Kind, Lane, Progress, Resources, Sample,
 	Source, Stage, Store, Targets, Vcf, shards,
@@ -28,6 +29,7 @@ const ALIGNED_BUILD: Build = Build::Grch38;
 pub struct Request {
 	pub output: PathBuf,
 	pub formats: Vec<Format>,
+	pub bam: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,7 +106,7 @@ impl Plan {
 			Source::Reads(_) => (
 				ALIGNED_BUILD,
 				vec![Stage::Align, Stage::Sort],
-				Some(file("bam")),
+				request.bam.then(|| file("bam")),
 			),
 			Source::Variants(_) | Source::Reference(_) => {
 				return Err(Error::NotAlignments(sample.path().to_owned()));
@@ -154,12 +156,13 @@ impl Plan {
 			&mut report,
 		)?)?);
 		let prepared;
-		let input = match (&self.sample.source, &self.outputs.alignments) {
+		let mut _scratch = None;
+		let alignments = match (&self.sample.source, &self.outputs.alignments) {
 			(Source::Alignments(input), None) => {
 				if self.stages.contains(&Stage::Index) {
 					index(input, &pools.compute, cancel, &mut report)?;
 				}
-				input
+				Alignments::open(input, reference, &pools.io)?
 			}
 			(Source::Alignments(input), Some(path)) => {
 				Sorting {
@@ -170,25 +173,24 @@ impl Plan {
 				}
 				.run(input, path, &mut report)?;
 				prepared = Input::open(path)?;
-				&prepared
+				Alignments::open(&prepared, reference, &pools.io)?
 			}
-			(Source::Reads(lanes), Some(path)) => {
-				self.align(
+			(Source::Reads(lanes), path) => {
+				let (found, guard) = self.align_reads(
 					lanes,
-					path,
-					&reference,
+					path.as_deref(),
+					reference,
 					store,
 					resources,
 					&pools,
 					cancel,
 					&mut report,
 				)?;
-				prepared = Input::open(path)?;
-				&prepared
+				_scratch = guard;
+				found
 			}
 			_ => return Err(Error::NotAlignments(self.sample.path().to_owned())),
 		};
-		let alignments = Alignments::open(input, reference, &pools.io)?;
 		let call_build = CallBuild::try_from(self.build).ok();
 		let panel = Panel::embedded(&pools.io)?;
 		let targets = call_build.map_or_else(Targets::default, |build| {
@@ -309,17 +311,52 @@ impl Plan {
 	}
 
 	#[allow(clippy::too_many_arguments)]
+	fn align_reads(
+		&self,
+		lanes: &[Lane],
+		path: Option<&Path>,
+		reference: Arc<Reference>,
+		store: &Store,
+		resources: &Resources,
+		pools: &Pools,
+		cancel: &Cancel,
+		report: &mut impl FnMut(Progress),
+	) -> Result<(Alignments, Option<Scratch>), Error> {
+		let output = path.map_or_else(|| self.scratch(), Path::to_owned);
+		let (header, held) = self.align(
+			lanes,
+			&output,
+			path.is_none(),
+			&reference,
+			store,
+			resources,
+			pools,
+			cancel,
+			report,
+		)?;
+		match held {
+			Output::Memory(records) => Ok((Alignments::held(header, reference, records), None)),
+			Output::File => {
+				let guard = path.is_none().then(|| Scratch(output.clone()));
+				let alignments = Alignments::open(&Input::open(&output)?, reference, &pools.io)?;
+				Ok((alignments, guard))
+			}
+		}
+	}
+
+	#[allow(clippy::too_many_arguments)]
 	fn align(
 		&self,
 		lanes: &[Lane],
 		path: &Path,
+		hold: bool,
 		reference: &Reference,
 		store: &Store,
 		resources: &Resources,
 		pools: &Pools,
 		cancel: &Cancel,
 		report: &mut impl FnMut(Progress),
-	) -> Result<(), Error> {
+	) -> Result<(Header, Output), Error> {
 		let preparing = self.stages.contains(&Stage::Reference);
 		let mut estimate = Estimate::new(Stage::Reference, 1, Instant::now());
 		let index = align::index(
@@ -332,6 +369,7 @@ impl Plan {
 			report(estimate.advance(1, Instant::now()));
 		}
 		let resident = u64::try_from(index.heap_bytes()).unwrap_or(u64::MAX);
+		let memory = resources.memory.saturating_sub(resident);
 		Alignment {
 			index: &index,
 			compute: &pools.compute,
@@ -342,10 +380,24 @@ impl Plan {
 			lanes,
 			&self.sample.name,
 			path,
-			sort_budget(resources.memory.saturating_sub(resident)),
+			hold,
+			if hold {
+				hold_budget(memory)
+			} else {
+				sort_budget(memory)
+			},
 			report,
-		)?;
-		Ok(())
+		)
+	}
+
+	fn scratch(&self) -> PathBuf {
+		let folder = self
+			.outputs
+			.variants
+			.as_deref()
+			.and_then(Path::parent)
+			.unwrap_or(Path::new("."));
+		folder.join(format!("{}.tmp.bam", self.sample.name))
 	}
 
 	fn reference(
@@ -369,6 +421,20 @@ impl Plan {
 			});
 			report(estimate.advance(download.received, now));
 		})
+	}
+}
+
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+	fn drop(&mut self) {
+		for path in [
+			self.0.clone(),
+			suffixed(&self.0, ".bai"),
+			suffixed(&self.0, ".csi"),
+		] {
+			let _ = std::fs::remove_file(path);
+		}
 	}
 }
 

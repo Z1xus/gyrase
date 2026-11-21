@@ -28,5 +28,5 @@ pub use record::{
 	Qualities, QualityInput, Record, RecordRef, Sequence, TagIter, Tags, Value,
 };
 pub use sam::{SamReader, SamWriter};
-pub use sort::{Sorted, Sorter};
+pub use sort::{Encoded, Records, Sorted, Sorter};
 pub use stats::{Flagstat, Idxstats, flagstat, idxstats};

@@ -3,6 +3,7 @@ mod key;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
+use std::hash::{BuildHasherDefault, Hasher};
 
 use self::key::{Extent, PairKey, SingleKey, extent, mate_extent, pair_key, single_key};
 use crate::error::{Error, MarkError};
@@ -10,6 +11,7 @@ use crate::header::{Header, Line};
 use crate::record::{Flags, RecordRef, Value};
 
 const FLAGS_AT: usize = 14;
+const MIX: u64 = 0x517c_c1b7_2722_0a95;
 const MIN_QUALITY: u8 = 15;
 const EXCLUDED: Flags = Flags::new(
 	Flags::SECONDARY.bits()
@@ -17,6 +19,39 @@ const EXCLUDED: Flags = Flags::new(
 		| Flags::UNMAPPED.bits()
 		| Flags::QC_FAIL.bits(),
 );
+
+#[derive(Debug, Default, Clone, Copy)]
+struct Mixer(u64);
+
+impl Hasher for Mixer {
+	fn finish(&self) -> u64 {
+		self.0 ^ self.0 >> 32
+	}
+
+	fn write(&mut self, bytes: &[u8]) {
+		for &byte in bytes {
+			self.write_u64(u64::from(byte));
+		}
+	}
+
+	fn write_u8(&mut self, value: u8) {
+		self.write_u64(u64::from(value));
+	}
+
+	fn write_u32(&mut self, value: u32) {
+		self.write_u64(u64::from(value));
+	}
+
+	fn write_u64(&mut self, value: u64) {
+		self.0 = (self.0.rotate_left(5) ^ value).wrapping_mul(MIX);
+	}
+
+	fn write_i64(&mut self, value: i64) {
+		self.write_u64(value.cast_unsigned());
+	}
+}
+
+type Fast<K, V> = HashMap<K, V, BuildHasherDefault<Mixer>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarkSettings {
@@ -89,9 +124,9 @@ pub(crate) struct Marker {
 	base: u64,
 	decided: usize,
 	groups: HashMap<Vec<u8>, u32>,
-	pairs: HashMap<PairKey, u64>,
-	singles: HashMap<SingleKey, u64>,
-	waiting: HashMap<Vec<u8>, Waiting>,
+	pairs: Fast<PairKey, u64>,
+	singles: Fast<SingleKey, u64>,
+	waiting: Fast<Vec<u8>, Waiting>,
 	latest: (i32, i32),
 	previous_placed: Option<(u32, u32)>,
 	stats: MarkStats,
@@ -105,9 +140,9 @@ impl Marker {
 			base: 0,
 			decided: 0,
 			groups: libraries(header),
-			pairs: HashMap::new(),
-			singles: HashMap::new(),
-			waiting: HashMap::new(),
+			pairs: Fast::default(),
+			singles: Fast::default(),
+			waiting: Fast::default(),
 			latest: (0, 0),
 			previous_placed: None,
 			stats: MarkStats::default(),
@@ -335,7 +370,6 @@ impl Marker {
 			)),
 			_ => None,
 		};
-		let name = record.name().to_vec();
 		let own_score = item.score;
 		if let Some(item) = self.items.get_mut(index) {
 			item.pos = single.coord();
@@ -343,7 +377,7 @@ impl Marker {
 		if let Some((pair, pair_score)) = paired {
 			self.stats.pairs += 1;
 			self.decide_pair_single(seq, single);
-			self.decide_pair(seq, pair, pair_score, &name);
+			self.decide_pair(seq, pair, pair_score);
 		} else {
 			self.stats.singles += 1;
 			self.decide_single(seq, single, own_score);
@@ -370,7 +404,7 @@ impl Marker {
 		}
 	}
 
-	fn decide_pair(&mut self, seq: u64, key: PairKey, score: i64, name: &[u8]) {
+	fn decide_pair(&mut self, seq: u64, key: PairKey, score: i64) {
 		match self.pairs.entry(key) {
 			Entry::Vacant(slot) => {
 				slot.insert(seq);
@@ -392,7 +426,11 @@ impl Marker {
 					Ordering::Greater => true,
 					Ordering::Less => false,
 					Ordering::Equal => {
-						RecordRef::new(&old.bytes).is_ok_and(|record| name < record.name())
+						let name = item_ref(&self.items, self.base, seq)
+							.and_then(|item| RecordRef::new(&item.bytes).ok())
+							.map(|record| record.name());
+						let old = RecordRef::new(&old.bytes).ok().map(|record| record.name());
+						name.zip(old).is_some_and(|(name, old)| name < old)
 					}
 				};
 				let duplicate = if new_wins {
@@ -476,13 +514,13 @@ fn libraries(header: &Header) -> HashMap<Vec<u8>, u32> {
 	groups
 }
 
-fn is_duplicate(bytes: &[u8]) -> bool {
+pub(crate) fn is_duplicate(bytes: &[u8]) -> bool {
 	bytes
 		.get(FLAGS_AT..FLAGS_AT + 2)
 		.is_some_and(|flags| Flags::new(u16::from_le_bytes([flags[0], flags[1]])).is_duplicate())
 }
 
-fn set_duplicate(bytes: &mut [u8], on: bool) {
+pub(crate) fn set_duplicate(bytes: &mut [u8], on: bool) {
 	if let Some(flags) = bytes.get_mut(FLAGS_AT..FLAGS_AT + 2) {
 		let current = u16::from_le_bytes([flags[0], flags[1]]);
 		let updated = if on {

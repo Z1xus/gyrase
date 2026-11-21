@@ -7,7 +7,7 @@ use gyrase_index::{Crai, DEFAULT_MAX_GAP, Index};
 use gyrase_io::{Workers, decode};
 use gyrase_reads::cram::{CramBatch, CramReader};
 use gyrase_reads::{
-	BamReader, Header, Line, Query, RecordBatch, RecordError, RecordRef, SamReader,
+	BamReader, Header, Line, Query, RecordBatch, RecordError, RecordRef, Records, SamReader,
 };
 
 use crate::{Error, Input, Kind};
@@ -27,12 +27,14 @@ pub struct Alignments {
 enum Lookup {
 	Bam(Index),
 	Cram(Crai),
+	Memory(Records),
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct Batches {
+pub(crate) struct Batches<'a> {
 	bam: Vec<RecordBatch>,
 	cram: Vec<CramBatch>,
+	memory: Option<(&'a Records, Interval)>,
 }
 
 impl Alignments {
@@ -56,6 +58,15 @@ impl Alignments {
 			lookup,
 			reference,
 		})
+	}
+
+	pub(crate) fn held(header: Header, reference: Arc<Reference>, records: Records) -> Self {
+		Self {
+			path: PathBuf::new(),
+			header,
+			lookup: Lookup::Memory(records),
+			reference,
+		}
 	}
 
 	pub fn header(&self) -> &Header {
@@ -84,9 +95,17 @@ impl Alignments {
 			)
 	}
 
-	pub(crate) fn fetch(&self, interval: Interval, workers: &Workers) -> Result<Batches, Error> {
-		let file = open(&self.path)?;
+	pub(crate) fn fetch(
+		&self,
+		interval: Interval,
+		workers: &Workers,
+	) -> Result<Batches<'_>, Error> {
 		let mut batches = Batches::default();
+		if let Lookup::Memory(records) = &self.lookup {
+			batches.memory = Some((records, interval));
+			return Ok(batches);
+		}
+		let file = open(&self.path)?;
 		match &self.lookup {
 			Lookup::Bam(index) => {
 				let chunks = index.plan(&[interval], DEFAULT_MAX_GAP).chunks().to_vec();
@@ -104,6 +123,7 @@ impl Alignments {
 					batches.bam.push(batch);
 				}
 			}
+			Lookup::Memory(_) => {}
 			Lookup::Cram(crai) => {
 				let mut reader = CramReader::query(
 					file,
@@ -137,6 +157,9 @@ impl Alignments {
 				.overlapping(interval)
 				.map(|entry| entry.slice_size)
 				.sum(),
+			Lookup::Memory(records) => {
+				records.count(interval.contig.get(), interval.start, interval.end) as u64
+			}
 		};
 		bytes + EMPTY_COST
 	}
@@ -147,7 +170,7 @@ impl Alignments {
 	}
 }
 
-impl Batches {
+impl Batches<'_> {
 	pub(crate) fn records(&self) -> impl Iterator<Item = Result<RecordRef<'_>, RecordError>> {
 		let bam = self.bam.iter().flat_map(|batch| {
 			batch
@@ -155,7 +178,10 @@ impl Batches {
 				.map(|located| located.map(|located| located.record))
 		});
 		let cram = self.cram.iter().flat_map(CramBatch::iter);
-		bam.chain(cram)
+		let memory = self.memory.into_iter().flat_map(|(records, interval)| {
+			records.overlapping(interval.contig.get(), interval.start, interval.end)
+		});
+		bam.chain(cram).chain(memory)
 	}
 }
 

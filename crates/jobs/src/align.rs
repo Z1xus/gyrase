@@ -9,20 +9,21 @@ use std::time::Instant;
 use gyrase_genome::Reference;
 use gyrase_io::{Decoded, Workers, decode};
 use gyrase_reads::{
-	FastqBatch, FastqReader, Fields, Header, InterleavedFastq, MarkSettings, MarkStats,
-	PairedBatch, PairedFastq, ReadRef, Sorter, interleaved, interleaved_pairs,
+	Encoded, FastqBatch, FastqReader, Fields, Header, InterleavedFastq, MarkSettings, PairedBatch,
+	PairedFastq, ReadRef, Sorter, interleaved, interleaved_pairs,
 };
 use synapton::{
 	AlignConfig, AlignedBatch, Aligner, BamEmitter, EmitError, Index, InsertSizes, ReadPair,
 	SeedConfig, Source,
 };
 
-use crate::bam::write_sorted;
+use crate::bam::{Mode, Output, write_sorted};
 use crate::counted::Counted;
 use crate::{Cancel, Error, Estimate, Input, Lane, Progress, Stage};
 
 const BATCH_READS: usize = 1 << 16;
 const QUEUE: usize = 2;
+const ENCODED_QUEUE: usize = 8;
 
 enum Chunk {
 	Pairs(PairedBatch),
@@ -74,9 +75,10 @@ impl Alignment<'_> {
 		lanes: &[Lane],
 		sample: &str,
 		output: &Path,
+		hold: bool,
 		budget: usize,
 		report: &mut impl FnMut(Progress),
-	) -> Result<Option<MarkStats>, Error> {
+	) -> Result<(Header, Output), Error> {
 		let mut header =
 			Header::from_contigs(self.index.contigs()).map_err(gyrase_reads::Error::from)?;
 		header.push_read_group(Fields::new().with(*b"ID", sample).with(*b"SM", sample));
@@ -84,11 +86,16 @@ impl Alignment<'_> {
 		let read = Arc::new(AtomicU64::new(0));
 		let mut estimate = Estimate::new(Stage::Align, total, Instant::now());
 		report(estimate.progress());
-		let stats = write_sorted(
+		let settings = MarkSettings::default();
+		let result = write_sorted(
 			&header,
 			output,
 			budget,
-			Some(MarkSettings::default()),
+			if hold {
+				Mode::Hold(settings)
+			} else {
+				Mode::Mark(settings)
+			},
 			self.compute,
 			self.cancel,
 			|sorter| {
@@ -100,7 +107,7 @@ impl Alignment<'_> {
 			},
 		)?;
 		report(Estimate::new(Stage::Sort, 1, Instant::now()).advance(1, Instant::now()));
-		Ok(stats)
+		Ok((header, result))
 	}
 
 	fn align(
@@ -114,30 +121,28 @@ impl Alignment<'_> {
 		let aligner = Aligner::new(self.index, AlignConfig::default(), self.compute);
 		thread::scope(|scope| {
 			let (chunk_sender, chunks) = mpsc::sync_channel(QUEUE);
-			let (batch_sender, batches) = mpsc::sync_channel::<(Chunk, AlignedBatch)>(QUEUE);
+			let (encoded_sender, encoded) = mpsc::sync_channel::<Vec<Encoded>>(ENCODED_QUEUE);
 			let reader = scope.spawn(move || read_lanes(lanes, self.io, read, &chunk_sender));
 			let writer = scope.spawn(move || {
-				let mut emitter = BamEmitter::new(self.index.contigs(), Some(sample.as_bytes()));
-				for (chunk, batch) in batches {
-					emitter
-						.emit(&batch, chunk.views().source(), |record| sorter.push(record))
-						.map_err(|error| match error {
-							EmitError::Convert(error) => Error::Align(error),
-							EmitError::Sink(error) => Error::Reads(error),
-						})?;
+				for parts in encoded {
+					for part in parts {
+						sorter.push_encoded(&part)?;
+					}
 				}
 				Ok::<_, Error>(())
 			});
 			let mut sizes = None;
 			for chunk in chunks {
 				self.cancel.check()?;
-				let batch = align_chunk(&aligner, &mut sizes, &chunk.views())?;
-				if batch_sender.send((chunk, batch)).is_err() {
+				let parts = align_chunk(&aligner, &mut sizes, &chunk.views(), || {
+					BamEmitter::new(self.index.contigs(), Some(sample.as_bytes()))
+				})?;
+				if encoded_sender.send(parts).is_err() {
 					break;
 				}
 				advance(read.load(Ordering::Relaxed));
 			}
-			drop(batch_sender);
+			drop(encoded_sender);
 			writer.join().map_err(|_| Error::Worker)??;
 			reader.join().map_err(|_| Error::Worker)?
 		})
@@ -178,21 +183,34 @@ impl Views<'_> {
 	}
 }
 
-fn align_chunk(
+fn align_chunk<'a>(
 	aligner: &Aligner<'_>,
 	sizes: &mut Option<InsertSizes>,
 	views: &Views<'_>,
-) -> Result<AlignedBatch, Error> {
-	Ok(match views {
-		Views::Reads(reads) => aligner.align_reads(reads)?,
+	emitter: impl Fn() -> BamEmitter<'a> + Sync,
+) -> Result<Vec<Encoded>, Error> {
+	let source = views.source();
+	let init = || (emitter(), Encoded::new());
+	let encode = |(emitter, encoded): &mut (BamEmitter<'_>, Encoded), batch: AlignedBatch| {
+		emitter
+			.emit(&batch, source, |record| encoded.push(record))
+			.map_err(|error| match error {
+				EmitError::Convert(error) => Error::Align(error),
+				EmitError::Sink(error) => Error::Reads(error.into()),
+			})?;
+		Ok::<_, Error>(encoded.take())
+	};
+	let parts = match views {
+		Views::Reads(reads) => aligner.align_reads_each(reads, init, encode)?,
 		Views::Pairs(pairs) => {
 			let sizes = match sizes {
 				Some(sizes) => *sizes,
 				None => *sizes.insert(aligner.estimate_insert_sizes(pairs)?),
 			};
-			aligner.align_pairs_with(&sizes, pairs)?
+			aligner.align_pairs_each(&sizes, pairs, init, encode)?
 		}
-	})
+	};
+	parts.into_iter().collect()
 }
 
 fn read_lanes(
