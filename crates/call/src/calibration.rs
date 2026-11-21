@@ -2,6 +2,7 @@ use gyrase_pileup::{Pileup, Window};
 
 const MAX_PERIOD: usize = 6;
 const MAX_SPAN: usize = 40;
+const MAX_TRACT: usize = 512;
 const PSEUDO_DEPTH: f64 = 20_000.0;
 const VARIANT_FRACTION: f64 = 0.1;
 const CLEAN_QUALITY: f64 = 55.0;
@@ -98,6 +99,9 @@ impl Calibration {
 
 	pub fn observe(&mut self, pileup: &Pileup<'_>) {
 		for column in pileup.columns() {
+			if column.observations.is_empty() {
+				continue;
+			}
 			let tract = Tract::at(pileup.window, column.position);
 			let required = u8::try_from(tract.span + 1).unwrap_or(u8::MAX);
 			let depth = column
@@ -187,6 +191,7 @@ fn periodic_run(bases: &[u8], period: usize) -> usize {
 	bases
 		.iter()
 		.zip(bases.iter().skip(period))
+		.take(MAX_TRACT)
 		.take_while(|(left, right)| left == right)
 		.count()
 }
