@@ -1,0 +1,615 @@
+use std::iter::repeat_n;
+
+use super::Merge;
+use super::group::Member;
+use super::input::Taken;
+use crate::Error;
+use crate::record::{Field, Record};
+use crate::value::{Cells, END_INT, MISSING_INT, Number, Numeric, ValueType};
+
+#[derive(Debug, Default)]
+struct Sum {
+	ints: Vec<i32>,
+	floats: Vec<f32>,
+	blocks: usize,
+	width: usize,
+}
+
+#[derive(Debug)]
+enum Shape {
+	Ints,
+	Floats,
+	Text,
+}
+
+#[derive(Debug)]
+struct Spread {
+	key: u32,
+	shape: Shape,
+	ints: Vec<i32>,
+	floats: Vec<f32>,
+	text: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub(super) struct Combiner {
+	samples: Vec<usize>,
+	present: Vec<Option<usize>>,
+	sums: Vec<Sum>,
+	spreads: Vec<Spread>,
+	spread_count: usize,
+	seen: Vec<u32>,
+	keys: Vec<u32>,
+	filters: Vec<u32>,
+	ids: Vec<u8>,
+	ints: Vec<i32>,
+	floats: Vec<f32>,
+	text: Vec<u8>,
+	counts: Vec<i32>,
+}
+
+fn nonzero(count: usize) -> usize {
+	count.max(1)
+}
+
+fn trailing_common(record: &Record) -> usize {
+	let reference = record.allele(0).unwrap_or_default();
+	if reference.len() < 2 {
+		return 0;
+	}
+	let mut length = 1;
+	while length < reference.len() {
+		let tail = reference
+			.len()
+			.checked_sub(length)
+			.and_then(|at| reference.get(at));
+		let mut finished = false;
+		for alt in record.alleles().skip(1) {
+			finished |= length >= alt.len();
+			let other = alt.len().checked_sub(length).and_then(|at| alt.get(at));
+			if other != tail {
+				finished = true;
+				break;
+			}
+		}
+		if finished {
+			break;
+		}
+		length += 1;
+	}
+	length - 1
+}
+
+fn copy_info(out: &mut Record, source: &Record, field: &Field) {
+	match &field.cells {
+		Cells::Flag => out.push_info_flag(field.key),
+		Cells::Ints(_) => out.push_info_ints(field.key, source.store.ints(&field.cells)),
+		Cells::Floats(_) => out.push_info_floats(field.key, source.store.floats(&field.cells)),
+		Cells::Text(_) => out.push_info_text(field.key, source.store.text(&field.cells)),
+	}
+}
+
+fn live<T: Numeric>(values: &[T]) -> &[T] {
+	let count = values.iter().take_while(|value| !value.is_end()).count();
+	values.get(..count).unwrap_or(values)
+}
+
+fn spread_size(number: Number, alleles: usize) -> usize {
+	match number {
+		Number::PerAlt => alleles.saturating_sub(1),
+		Number::PerAllele => alleles,
+		Number::PerGenotype => alleles * (alleles + 1) / 2,
+		Number::Fixed(_) | Number::Variable => 0,
+	}
+}
+
+fn scatter<T: Numeric>(target: &mut [T], values: &[T]) {
+	for (slot, &value) in target.iter_mut().zip(live(values)) {
+		if !value.is_missing() {
+			*slot = value;
+		}
+	}
+}
+
+fn gather<'a, T: Numeric + 'a>(
+	out: &mut Vec<T>,
+	sources: impl Iterator<Item = (usize, Option<(&'a [T], usize)>)>,
+	size: usize,
+) -> Result<(), Error> {
+	for (samples, source) in sources {
+		match source {
+			None => {
+				for _ in 0..samples {
+					out.push(T::MISSING);
+					out.extend(repeat_n(T::END, size - 1));
+				}
+			}
+			Some((values, width)) => {
+				let chunks = values.chunks_exact(width.max(1));
+				if chunks.len() < samples {
+					return Err(Error::Bcf("FORMAT field does not cover every sample"));
+				}
+				for chunk in chunks.take(samples) {
+					let kept = live(chunk);
+					let kept = kept.get(..kept.len().min(size)).unwrap_or(kept);
+					out.extend_from_slice(kept);
+					out.extend(repeat_n(T::END, size - kept.len()));
+				}
+			}
+		}
+	}
+	Ok(())
+}
+
+fn sum_floats(sum: &mut Sum) -> Vec<f32> {
+	for value in &mut sum.floats {
+		if value.is_missing() {
+			*value = 0.0;
+		}
+	}
+	let mut blocks = sum.floats.chunks_exact(sum.width);
+	let mut total = blocks.next().unwrap_or_default().to_vec();
+	for block in blocks {
+		for (total, value) in total.iter_mut().zip(block) {
+			*total += value;
+		}
+	}
+	total
+}
+
+fn sum_ints(sum: &mut Sum) -> Vec<i32> {
+	for value in &mut sum.ints {
+		if value.is_missing() {
+			*value = 0;
+		}
+	}
+	let mut blocks = sum.ints.chunks_exact(sum.width);
+	let mut total = blocks.next().unwrap_or_default().to_vec();
+	for block in blocks {
+		for (total, value) in total.iter_mut().zip(block) {
+			*total = total.wrapping_add(*value);
+		}
+	}
+	total
+}
+
+fn records<'a>(taken: &'a [Taken], group: &[Member]) -> Result<Vec<&'a Record>, Error> {
+	group
+		.iter()
+		.map(|member| {
+			taken
+				.get(member.input)
+				.and_then(|source| source.record(member.slot))
+				.ok_or(Error::Limits("records"))
+		})
+		.collect()
+}
+
+fn alleles(out: &mut Record, first: &Record) {
+	let trim = trailing_common(first);
+	out.set_alleles(first.alleles().map(|allele| {
+		allele
+			.get(..allele.len().saturating_sub(trim))
+			.unwrap_or(allele)
+	}));
+}
+
+fn source<'a>(
+	present: &[Option<usize>],
+	taken: &'a [Taken],
+	input: usize,
+	key: u32,
+) -> Option<(&'a Record, &'a Field)> {
+	let slot = present.get(input).copied().flatten()?;
+	let record = taken.get(input)?.record(slot)?;
+	Some((record, record.format_field(key)?))
+}
+
+impl Combiner {
+	pub(super) fn new(merge: &Merge, samples: &[usize]) -> Self {
+		Self {
+			samples: samples.to_vec(),
+			present: vec![None; samples.len()],
+			sums: merge.rules.iter().map(|_| Sum::default()).collect(),
+			spreads: Vec::new(),
+			spread_count: 0,
+			seen: Vec::new(),
+			keys: Vec::new(),
+			filters: Vec::new(),
+			ids: Vec::new(),
+			ints: Vec::new(),
+			floats: Vec::new(),
+			text: Vec::new(),
+			counts: Vec::new(),
+		}
+	}
+
+	pub(super) fn combine(
+		&mut self,
+		merge: &Merge,
+		taken: &[Taken],
+		group: &[Member],
+		out: &mut Record,
+	) -> Result<(), Error> {
+		self.present.fill(None);
+		for member in group {
+			let slot = self
+				.present
+				.get_mut(member.input)
+				.ok_or(Error::Limits("inputs"))?;
+			*slot = Some(member.slot);
+		}
+		let records = records(taken, group)?;
+		let first = *records.first().ok_or(Error::Limits("empty group"))?;
+		out.clear();
+		out.set_site(first.contig(), first.start());
+		self.identity(out, &records);
+		alleles(out, first);
+		self.filters(merge, out, &records);
+		self.info(merge, out, &records, first.allele_count())?;
+		self.format(merge, taken, out, &records, first.allele_count())
+	}
+
+	fn identity(&mut self, out: &mut Record, records: &[&Record]) {
+		self.ids.clear();
+		let mut quality: Option<f32> = None;
+		for record in records {
+			let id = record.id();
+			let known = self.ids.split(|byte| *byte == b';').any(|part| part == id);
+			if !id.is_empty() && id != b"." && !known {
+				if !self.ids.is_empty() {
+					self.ids.push(b';');
+				}
+				self.ids.extend_from_slice(id);
+			}
+			if let Some(value) = record.qual() {
+				quality =
+					Some(quality.map_or(value, |best| if best < value { value } else { best }));
+			}
+		}
+		out.set_id(&self.ids);
+		out.set_qual(quality);
+	}
+
+	fn filters(&mut self, merge: &Merge, out: &mut Record, records: &[&Record]) {
+		self.filters.clear();
+		for record in records {
+			for &filter in record.filters() {
+				if !self.filters.contains(&filter) {
+					self.filters.push(filter);
+				}
+			}
+		}
+		if self.filters.len() > 1 {
+			self.filters.retain(|&filter| Some(filter) != merge.pass);
+		}
+		for &filter in &self.filters {
+			out.push_filter(filter);
+		}
+	}
+
+	fn info(
+		&mut self,
+		merge: &Merge,
+		out: &mut Record,
+		records: &[&Record],
+		alleles: usize,
+	) -> Result<(), Error> {
+		for sum in &mut self.sums {
+			sum.ints.clear();
+			sum.floats.clear();
+			sum.blocks = 0;
+			sum.width = 0;
+		}
+		self.spread_count = 0;
+		self.seen.clear();
+		for record in records {
+			for field in record.info() {
+				if merge.skipped.contains(&field.key) {
+					continue;
+				}
+				if let Some(index) = merge.rules.iter().position(|rule| rule.key == field.key) {
+					self.add_sum(index, record, field)?;
+					continue;
+				}
+				let number = merge
+					.header
+					.info_def(field.key)
+					.map_or(Number::Variable, |definition| definition.number);
+				let size = spread_size(number, alleles);
+				if size > 0 {
+					self.add_spread(record, field, size);
+				} else if !self.seen.contains(&field.key) {
+					self.seen.push(field.key);
+					copy_info(out, record, field);
+				}
+			}
+		}
+		self.finish_sums(merge, out);
+		self.finish_spreads(out);
+		Ok(())
+	}
+
+	fn add_sum(&mut self, index: usize, record: &Record, field: &Field) -> Result<(), Error> {
+		let sum = self.sums.get_mut(index).ok_or(Error::Limits("rules"))?;
+		let width = match &field.cells {
+			Cells::Ints(_) => {
+				let values = live(record.store.ints(&field.cells));
+				sum.ints.extend_from_slice(values);
+				values.len()
+			}
+			Cells::Floats(_) => {
+				let values = live(record.store.floats(&field.cells));
+				sum.floats.extend_from_slice(values);
+				values.len()
+			}
+			Cells::Flag | Cells::Text(_) => return Err(Error::Incompatible("INFO type")),
+		};
+		if sum.blocks > 0 && sum.width != width {
+			return Err(Error::Incompatible("INFO value counts differ"));
+		}
+		sum.width = width;
+		sum.blocks += 1;
+		Ok(())
+	}
+
+	fn finish_sums(&mut self, merge: &Merge, out: &mut Record) {
+		for (rule, sum) in merge.rules.iter().zip(&mut self.sums) {
+			if sum.blocks == 0 || sum.width == 0 {
+				continue;
+			}
+			if rule.value_type == ValueType::Float {
+				out.push_info_floats(rule.key, &sum_floats(sum));
+			} else {
+				out.push_info_ints(rule.key, &sum_ints(sum));
+			}
+		}
+	}
+
+	fn spread_index(&mut self, field: &Field, size: usize) -> usize {
+		let known = self
+			.spreads
+			.get(..self.spread_count)
+			.and_then(|spreads| spreads.iter().position(|spread| spread.key == field.key));
+		if let Some(index) = known {
+			return index;
+		}
+		if self.spread_count == self.spreads.len() {
+			self.spreads.push(Spread {
+				key: field.key,
+				shape: Shape::Text,
+				ints: Vec::new(),
+				floats: Vec::new(),
+				text: Vec::new(),
+			});
+		}
+		let index = self.spread_count;
+		self.spread_count += 1;
+		if let Some(spread) = self.spreads.get_mut(index) {
+			spread.key = field.key;
+			spread.ints.clear();
+			spread.floats.clear();
+			spread.text.clear();
+			spread.shape = match &field.cells {
+				Cells::Ints(_) | Cells::Flag => {
+					spread.ints.resize(size, MISSING_INT);
+					Shape::Ints
+				}
+				Cells::Floats(_) => {
+					spread.floats.resize(size, f32::MISSING);
+					Shape::Floats
+				}
+				Cells::Text(_) => Shape::Text,
+			};
+		}
+		index
+	}
+
+	fn add_spread(&mut self, record: &Record, field: &Field, size: usize) {
+		let index = self.spread_index(field, size);
+		let Some(spread) = self.spreads.get_mut(index) else {
+			return;
+		};
+		match &field.cells {
+			Cells::Ints(_) => scatter(&mut spread.ints, record.store.ints(&field.cells)),
+			Cells::Floats(_) => scatter(&mut spread.floats, record.store.floats(&field.cells)),
+			Cells::Text(_) => {
+				spread.text.clear();
+				spread
+					.text
+					.extend_from_slice(record.store.text(&field.cells));
+			}
+			Cells::Flag => {}
+		}
+	}
+
+	fn finish_spreads(&mut self, out: &mut Record) {
+		for spread in self.spreads.iter().take(self.spread_count) {
+			match spread.shape {
+				Shape::Ints => out.push_info_ints(spread.key, &spread.ints),
+				Shape::Floats => out.push_info_floats(spread.key, &spread.floats),
+				Shape::Text => out.push_info_text(spread.key, &spread.text),
+			}
+		}
+	}
+
+	fn format(
+		&mut self,
+		merge: &Merge,
+		taken: &[Taken],
+		out: &mut Record,
+		records: &[&Record],
+		alleles: usize,
+	) -> Result<(), Error> {
+		self.keys.clear();
+		let mut has_genotype = false;
+		for record in records {
+			for field in record.format() {
+				if Some(field.key) == merge.genotype {
+					has_genotype = true;
+				} else if !self.keys.contains(&field.key) {
+					self.keys.push(field.key);
+				}
+			}
+		}
+		if let (true, Some(key)) = (has_genotype, merge.genotype) {
+			self.genotype(taken, key, out)?;
+			if let Some(keys) = merge.counts
+				&& out.count_alleles(keys.genotype, &mut self.counts)?
+			{
+				let total = self.counts.iter().sum();
+				out.set_info_ints(keys.allele_number, &[total]);
+				out.set_info_ints(keys.allele_count, self.counts.get(1..).unwrap_or_default());
+			}
+		}
+		for index in 0..self.keys.len() {
+			let key = *self.keys.get(index).ok_or(Error::Limits("tags"))?;
+			self.field(merge, taken, key, alleles, out)?;
+		}
+		Ok(())
+	}
+
+	fn genotype(&mut self, taken: &[Taken], key: u32, out: &mut Record) -> Result<(), Error> {
+		let mut size = 1;
+		for input in 0..self.samples.len() {
+			if let Some((record, field)) = source(&self.present, taken, input, key) {
+				for sample in record.store.ints(&field.cells).chunks(nonzero(field.width)) {
+					size = size.max(live(sample).len());
+				}
+			}
+		}
+		self.ints.clear();
+		for input in 0..self.samples.len() {
+			let samples = self.samples.get(input).copied().unwrap_or(0);
+			match source(&self.present, taken, input, key) {
+				None => self.ints.extend(repeat_n(0, samples * size)),
+				Some((record, field)) => {
+					let values = record.store.ints(&field.cells);
+					let chunks = values.chunks_exact(nonzero(field.width));
+					if chunks.len() < samples {
+						return Err(Error::Bcf("FORMAT field does not cover every sample"));
+					}
+					for sample in chunks.take(samples) {
+						let kept = live(sample);
+						self.ints.extend(
+							kept.iter()
+								.map(|&value| if value == MISSING_INT { 0 } else { value }),
+						);
+						self.ints
+							.extend(repeat_n(END_INT, size.saturating_sub(kept.len())));
+					}
+				}
+			}
+		}
+		out.push_format_ints(key, size, &self.ints);
+		Ok(())
+	}
+
+	fn field(
+		&mut self,
+		merge: &Merge,
+		taken: &[Taken],
+		key: u32,
+		alleles: usize,
+		out: &mut Record,
+	) -> Result<(), Error> {
+		let number = merge
+			.header
+			.format_def(key)
+			.map_or(Number::Variable, |definition| definition.number);
+		let mut widest = 0;
+		let mut cells = None;
+		for input in 0..self.samples.len() {
+			if let Some((_, field)) = source(&self.present, taken, input, key) {
+				widest = widest.max(field.width);
+				cells.get_or_insert(field.cells.clone());
+			}
+		}
+		let size = match spread_size(number, alleles) {
+			0 => nonzero(widest),
+			size => size,
+		};
+		match cells {
+			Some(Cells::Ints(_)) => {
+				self.ints.clear();
+				let sources = (0..self.samples.len()).map(|input| {
+					let found = source(&self.present, taken, input, key);
+					(
+						self.samples.get(input).copied().unwrap_or(0),
+						found.map(|(record, field)| (record.store.ints(&field.cells), field.width)),
+					)
+				});
+				gather(&mut self.ints, sources, size)?;
+				out.push_format_ints(key, size, &self.ints);
+			}
+			Some(Cells::Floats(_)) => {
+				self.floats.clear();
+				let sources = (0..self.samples.len()).map(|input| {
+					let found = source(&self.present, taken, input, key);
+					(
+						self.samples.get(input).copied().unwrap_or(0),
+						found.map(|(record, field)| {
+							(record.store.floats(&field.cells), field.width)
+						}),
+					)
+				});
+				gather(&mut self.floats, sources, size)?;
+				out.push_format_floats(key, size, &self.floats);
+			}
+			Some(Cells::Text(_)) => {
+				let width = self.text_field(taken, key, number, size)?;
+				out.push_format_text(key, width, &self.text);
+			}
+			Some(Cells::Flag) | None => return Err(Error::Bcf("FORMAT field without values")),
+		}
+		Ok(())
+	}
+
+	fn text_field(
+		&mut self,
+		taken: &[Taken],
+		key: u32,
+		number: Number,
+		size: usize,
+	) -> Result<usize, Error> {
+		let default_len = match number {
+			Number::PerAlt | Number::PerAllele | Number::PerGenotype => size * 2 - 1,
+			Number::Fixed(_) | Number::Variable => 1,
+		};
+		let mut width = default_len;
+		for input in 0..self.samples.len() {
+			if let Some((_, field)) = source(&self.present, taken, input, key) {
+				width = width.max(field.width);
+			}
+		}
+		self.text.clear();
+		for input in 0..self.samples.len() {
+			let samples = self.samples.get(input).copied().unwrap_or(0);
+			match source(&self.present, taken, input, key) {
+				None => {
+					for _ in 0..samples {
+						let start = self.text.len();
+						self.text.push(b'.');
+						for _ in 1..default_len.div_ceil(2) {
+							self.text.extend_from_slice(b",.");
+						}
+						self.text.resize(start + width, 0);
+					}
+				}
+				Some((record, field)) => {
+					let values = record.store.text(&field.cells);
+					let chunks = values.chunks_exact(nonzero(field.width));
+					if chunks.len() < samples {
+						return Err(Error::Bcf("FORMAT field does not cover every sample"));
+					}
+					for sample in chunks.take(samples) {
+						let start = self.text.len();
+						self.text.extend_from_slice(sample);
+						self.text.resize(start + width, 0);
+					}
+				}
+			}
+		}
+		Ok(width)
+	}
+}

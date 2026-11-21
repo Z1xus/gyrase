@@ -56,6 +56,12 @@ impl Reference {
 	}
 
 	pub fn fetch(&self, interval: &Interval, bases: &mut Vec<u8>) -> Result<(), Error> {
+		self.fetch_cased(interval, bases)?;
+		bases.make_ascii_uppercase();
+		Ok(())
+	}
+
+	pub fn fetch_cased(&self, interval: &Interval, bases: &mut Vec<u8>) -> Result<(), Error> {
 		bases.clear();
 		let entry = self
 			.entries
@@ -78,7 +84,6 @@ impl Reference {
 		bases.resize(len, 0);
 		read_exact_at(&self.file, bases, first)?;
 		bases.retain(|byte| !byte.is_ascii_whitespace());
-		bases.make_ascii_uppercase();
 		if bases.len() as u64 != interval.len() {
 			return Err(Error::InvalidFasta { offset: first });
 		}

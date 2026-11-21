@@ -16,6 +16,7 @@ gyrase-index = { path = "crates/index" }
 gyrase-io = { path = "crates/io" }
 gyrase-jobs = { path = "crates/jobs" }
 gyrase-reads = { path = "crates/reads" }
+gyrase-variants = { path = "crates/variants" }
 bzip2 = "0.6.1"
 crossbeam-channel = "0.5.17"
 flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] }
