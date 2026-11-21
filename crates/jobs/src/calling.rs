@@ -19,6 +19,7 @@ const MIN_SHARD_LEN: u64 = 1 << 14;
 const SPLIT_FACTOR: u64 = 2;
 const PAD: u64 = 2_000;
 const SURVEY_STRIDE: u64 = 16;
+const CONTEXT: u64 = 1_000;
 const COVERAGE_MAPPING_QUALITY: u8 = 20;
 
 #[derive(Debug, Clone)]
@@ -160,13 +161,13 @@ impl Shard {
 
 impl Calling<'_> {
 	pub fn survey(self, shards: &[Shard]) -> Result<Survey, Error> {
+		let blocks = blocks(shards);
 		let parts: Vec<Result<(Calibration, Coverage), Error>> = self.workers.install(|| {
-			shards
+			blocks
 				.par_iter()
-				.filter(|shard| (shard.interval.start / SHARD_LEN).is_multiple_of(SURVEY_STRIDE))
 				.map_init(Scratch::new, |scratch, shard| {
 					self.cancel.check()?;
-					self.with_pileup(shard, scratch, |pileup| {
+					self.with_pileup(shard, 0, scratch, |pileup| {
 						let mut calibration = Calibration::new();
 						if matches!(shard.chromosome, Chromosome::Autosome(_)) {
 							calibration.observe(pileup);
@@ -260,10 +261,13 @@ impl Calling<'_> {
 		let mut caller = Caller::new(ploidy);
 		caller.indel_rates.clone_from(&survey.rates);
 		let targets = &targets[target_range(targets, shard)];
-		self.with_pileup(shard, scratch, |pileup| {
+		self.with_pileup(shard, CONTEXT, scratch, |pileup| {
 			let sites = sites(pileup.window, targets);
 			let mut calls = Calls::default();
 			caller.discover(pileup, &mut calls.discovered);
+			calls
+				.discovered
+				.retain(|call| (shard.interval.start..shard.interval.end).contains(&call.position));
 			caller.genotype(pileup, &sites, &mut calls.known);
 			calls
 		})
@@ -272,19 +276,24 @@ impl Calling<'_> {
 	fn with_pileup<T>(
 		self,
 		shard: &Shard,
+		context: u64,
 		scratch: &mut Scratch,
 		work: impl FnOnce(&Pileup<'_>) -> T,
 	) -> Result<T, Error> {
 		let alignments = self.alignments;
-		let interval = shard.interval;
 		let contig = alignments
-			.reference_contig(interval.contig)
+			.reference_contig(shard.interval.contig)
 			.ok_or(Error::UnknownContig)?;
 		let length = alignments
 			.reference()
 			.contigs()
 			.get(contig)
-			.map_or(interval.end, |reference| reference.length);
+			.map_or(shard.interval.end, |reference| reference.length);
+		let interval = Interval {
+			start: shard.interval.start.saturating_sub(context),
+			end: (shard.interval.end + context).min(length),
+			..shard.interval
+		};
 		let window = Interval {
 			contig,
 			start: interval.start.saturating_sub(PAD),
@@ -304,6 +313,27 @@ impl Calling<'_> {
 		)?;
 		Ok(work(&pileup))
 	}
+}
+
+fn blocks(shards: &[Shard]) -> Vec<Shard> {
+	let block = |shard: &Shard| {
+		(
+			shard.interval.contig,
+			shard.interval.start / SHARD_LEN,
+			shard.pseudoautosomal,
+		)
+	};
+	let mut blocks: Vec<Shard> = Vec::new();
+	for shard in shards
+		.iter()
+		.filter(|shard| (shard.interval.start / SHARD_LEN).is_multiple_of(SURVEY_STRIDE))
+	{
+		match blocks.last_mut() {
+			Some(last) if block(last) == block(shard) => last.interval.end = shard.interval.end,
+			_ => blocks.push(shard.clone()),
+		}
+	}
+	blocks
 }
 
 fn target_range(targets: &[Target], shard: &Shard) -> Range<usize> {
