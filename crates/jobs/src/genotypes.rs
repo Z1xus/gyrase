@@ -34,6 +34,7 @@ enum Source {
 	Fill,
 	Block,
 	Record,
+	Conflict,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -474,16 +475,25 @@ impl<'a> Collector<'a> {
 			Verdict::Missing => (SiteCall::MISSING, None),
 			Verdict::Call(call, reference) => (call, reference),
 		};
-		if block {
-			if *source == Source::None {
+		match *source {
+			Source::None if block => {
 				*source = Source::Block;
 				*slot = call;
 			}
-		} else if *source != Source::Record || *slot == SiteCall::MISSING {
-			*source = Source::Record;
-			*slot = call;
-		} else if call != SiteCall::MISSING {
-			*slot = combine(*slot, call, reference);
+			_ if block => {}
+			Source::Conflict => {}
+			Source::Record if *slot != SiteCall::MISSING => {
+				if call != SiteCall::MISSING {
+					*slot = combine(*slot, call, reference);
+					if *slot == SiteCall::MISSING {
+						*source = Source::Conflict;
+					}
+				}
+			}
+			_ => {
+				*source = Source::Record;
+				*slot = call;
+			}
 		}
 	}
 
