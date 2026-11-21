@@ -89,14 +89,14 @@ fn run(args: Vec<OsString>) -> Result<(), Failure> {
 			)
 		})
 		.collect::<Result<Vec<_>, _>>()?;
-	let mut used: HashSet<&Path> = paths.iter().map(PathBuf::as_path).collect();
+	let mut used: HashSet<PathBuf> = paths.iter().map(|path| identity(path)).collect();
 	if let Some(path) = plans
 		.iter()
 		.flat_map(written)
-		.find(|path| !used.insert(path))
+		.find(|path| !used.insert(identity(path)))
 	{
 		return Err(Failure::new(format!(
-			"{}: would be written more than once",
+			"{}: would overwrite an input or another output",
 			path.display()
 		)));
 	}
@@ -109,14 +109,38 @@ fn run(args: Vec<OsString>) -> Result<(), Failure> {
 	Ok(())
 }
 
-fn written(plan: &Plan) -> impl Iterator<Item = &Path> {
+fn written(plan: &Plan) -> impl Iterator<Item = PathBuf> {
 	let outputs = &plan.outputs;
-	outputs
+	let alignments = outputs
 		.alignments
 		.iter()
-		.chain(&outputs.variants)
-		.chain(outputs.raw.iter().map(|(_, path)| path))
-		.map(PathBuf::as_path)
+		.flat_map(|path| [path.clone(), sidecar(path, ".bai"), sidecar(path, ".csi")]);
+	let variants = outputs
+		.variants
+		.iter()
+		.flat_map(|path| [path.clone(), sidecar(path, ".tbi")]);
+	alignments
+		.chain(variants)
+		.chain(outputs.raw.iter().map(|(_, path)| path.clone()))
+}
+
+fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+	let mut name = path.as_os_str().to_owned();
+	name.push(suffix);
+	PathBuf::from(name)
+}
+
+fn identity(path: &Path) -> PathBuf {
+	path.canonicalize().unwrap_or_else(|_| {
+		let parent = path
+			.parent()
+			.filter(|parent| !parent.as_os_str().is_empty())
+			.unwrap_or(Path::new("."));
+		match (parent.canonicalize(), path.file_name()) {
+			(Ok(folder), Some(name)) => folder.join(name),
+			_ => std::path::absolute(path).unwrap_or_else(|_| path.to_owned()),
+		}
+	})
 }
 
 fn parse_formats(list: &str) -> Result<Vec<Format>, Failure> {
