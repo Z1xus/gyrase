@@ -1,5 +1,5 @@
 use gyrase_extract::CallBuild;
-use gyrase_jobs::{Progress, Source};
+use gyrase_jobs::{Kind, Lane, Progress, Source};
 use slint::{ModelRc, SharedString, VecModel};
 
 use crate::prepared::Prepared;
@@ -79,11 +79,23 @@ fn sample(app: &App, prepared: &Prepared) {
 
 fn tags(prepared: &Prepared) -> ModelRc<SharedString> {
 	let plan = &prepared.plan;
-	let mut tags = Vec::new();
-	if let Source::Alignments(input) = &plan.sample.source {
-		tags.push(labels::kind(input.kind).into());
-		tags.push(labels::size(input.size).into());
-	}
+	let (kind, size) = match &plan.sample.source {
+		Source::Alignments(input) | Source::Variants(input) | Source::Reference(input) => {
+			(input.kind, input.size)
+		}
+		Source::Reads(lanes) => (
+			Kind::Fastq,
+			lanes
+				.iter()
+				.flat_map(|lane| match lane {
+					Lane::Single(input) => vec![input],
+					Lane::Paired(first, second) => vec![first, second],
+				})
+				.map(|input| input.size)
+				.sum(),
+		),
+	};
+	let mut tags = vec![labels::kind(kind).into(), labels::size(size).into()];
 	tags.push(plan.build.name().into());
 	model(tags)
 }

@@ -4,7 +4,9 @@ pub fn files() -> Option<Vec<PathBuf>> {
 	rfd::FileDialog::new()
 		.add_filter(
 			"DNA files",
-			&["fastq", "fq", "gz", "sam", "bam", "cram", "vcf", "bcf"],
+			&[
+				"fastq", "fq", "gz", "bgz", "sam", "bam", "cram", "vcf", "bcf",
+			],
 		)
 		.pick_files()
 }
