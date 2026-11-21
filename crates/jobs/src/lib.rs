@@ -1,4 +1,5 @@
 mod alignments;
+mod bam;
 mod calling;
 mod cancel;
 mod error;

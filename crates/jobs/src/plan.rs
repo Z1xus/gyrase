@@ -1,7 +1,5 @@
-use std::ffi::OsString;
-use std::fs::{self, File};
 use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -10,11 +8,10 @@ use gyrase_extract::{
 	write_raw_data,
 };
 use gyrase_genome::{Build, Reference};
-use gyrase_index::Format as IndexFormat;
 use gyrase_io::Workers;
-use gyrase_reads::{BamReader, index_bam, index_layout};
 
 use crate::alignments::{header, indexed};
+use crate::bam::{coordinate_sorted, create, index, sort, sort_budget};
 use crate::{
 	Alignments, Calling, Cancel, Error, Estimate, Input, Kind, Progress, Resources, Sample, Source,
 	Stage, Store, Targets, Vcf, shards,
@@ -40,6 +37,7 @@ pub struct Plan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outputs {
+	pub alignments: Option<PathBuf>,
 	pub variants: PathBuf,
 	pub raw: Vec<(Format, PathBuf)>,
 }
@@ -62,24 +60,32 @@ impl Plan {
 		let Source::Alignments(input) = &sample.source else {
 			return Err(Error::NotAlignments(sample.path().to_owned()));
 		};
-		let build = Build::detect(&header(input, None, &io)?.contigs()?).unwrap_or(DEFAULT_BUILD);
+		let header = header(input, None, &io)?;
+		let build = Build::detect(&header.contigs()?).unwrap_or(DEFAULT_BUILD);
 		let exported = CallBuild::try_from(build).is_ok();
 		let mut stages = Vec::new();
 		if store.reference(build).is_none() {
 			stages.push(Stage::Reference);
 		}
+		let file = |suffix: &str| request.output.join(format!("{}.{suffix}", sample.name));
+		let mut alignments = None;
 		if !indexed(input) {
 			if input.kind != Kind::Bam {
 				return Err(Error::MissingIndex(input.path.clone()));
 			}
-			stages.push(Stage::Index);
+			if coordinate_sorted(&header) {
+				stages.push(Stage::Index);
+			} else {
+				stages.push(Stage::Sort);
+				alignments = Some(file("sorted.bam"));
+			}
 		}
 		stages.push(Stage::Call);
 		if exported && !request.formats.is_empty() {
 			stages.push(Stage::Export);
 		}
-		let file = |suffix: &str| request.output.join(format!("{}.{suffix}", sample.name));
 		let outputs = Outputs {
+			alignments,
 			variants: file("vcf.gz"),
 			raw: request
 				.formats
@@ -117,8 +123,24 @@ impl Plan {
 			cancel,
 			&mut report,
 		)?)?);
+		let sorted;
+		let input = match &self.outputs.alignments {
+			Some(path) => {
+				sort(
+					input,
+					path,
+					sort_budget(resources.memory),
+					&pools.compute,
+					cancel,
+					&mut report,
+				)?;
+				sorted = Input::open(path)?;
+				&sorted
+			}
+			None => input,
+		};
 		if self.stages.contains(&Stage::Index) {
-			index(input, &pools.io, cancel, &mut report)?;
+			index(input, &pools.compute, cancel, &mut report)?;
 		}
 		let alignments = Alignments::open(input, reference, &pools.io)?;
 		let call_build = CallBuild::try_from(self.build).ok();
@@ -212,51 +234,6 @@ impl Pools {
 			io: Workers::new(IO_THREADS)?,
 		})
 	}
-}
-
-fn index(
-	input: &Input,
-	workers: &Workers,
-	cancel: &Cancel,
-	report: &mut impl FnMut(Progress),
-) -> Result<(), Error> {
-	let file = File::open(&input.path).map_err(|source| Error::Open {
-		path: input.path.clone(),
-		source,
-	})?;
-	let size = file.metadata().map_or(0, |metadata| metadata.len());
-	let mut reader = BamReader::open(Box::new(file), workers)?;
-	let (format, geometry) = index_layout(reader.header())?;
-	let mut estimate = Estimate::new(Stage::Index, size, Instant::now());
-	report(estimate.progress());
-	let index = index_bam(&mut reader, geometry, |position| {
-		cancel.check()?;
-		report(estimate.advance(position, Instant::now()));
-		Ok::<_, Error>(())
-	})?;
-	let path = suffixed(
-		&input.path,
-		match format {
-			IndexFormat::Csi => ".csi",
-			IndexFormat::Bai | IndexFormat::Tbi => ".bai",
-		},
-	);
-	let partial = suffixed(&path, ".part");
-	index.write(format, create(&partial)?, workers)?;
-	fs::rename(&partial, &path).map_err(|source| Error::Open { path, source })
-}
-
-fn suffixed(path: &Path, suffix: &str) -> PathBuf {
-	let mut name = OsString::from(path);
-	name.push(suffix);
-	PathBuf::from(name)
-}
-
-fn create(path: &Path) -> Result<File, Error> {
-	File::create(path).map_err(|source| Error::Open {
-		path: path.to_owned(),
-		source,
-	})
 }
 
 fn now() -> Result<Timestamp, Error> {
