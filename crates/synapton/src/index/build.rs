@@ -45,7 +45,7 @@ impl Extractor {
 		let wanted = (block.length + overlap).min(block.span.length - block.start);
 		reference.window(
 			&block.span,
-			i64_of(block.start),
+			i64_of(block.span.start + block.start),
 			usize_of(wanted),
 			&mut self.codes,
 		);
