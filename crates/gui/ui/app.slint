@@ -1,8 +1,7 @@
 import "../assets/fonts/Geist-Regular.ttf";
 import "../assets/fonts/Geist-Medium.ttf";
 import "../assets/fonts/Geist-SemiBold.ttf";
-import "../assets/fonts/GeistMono-Regular.ttf";
-import { Gel } from "palette.slint";
+import { Gel, Metrics } from "palette.slint";
 import { DoneView } from "done-view.slint";
 import { PickView } from "pick-view.slint";
 import { ReadyView } from "ready-view.slint";
@@ -16,15 +15,13 @@ export component App inherits Window {
     in property <bool> dragging;
     in property <string> error;
     in property <string> name;
-    in property <[string]> tags;
+    in property <string> detail;
     in property <[Step]> steps;
     in property <[Chip]> chips;
     in property <string> folder;
-    in property <StepKind> stage: StepKind.call;
-    in property <string> stage-label;
-    in property <string> stage-position;
+    in property <int> current;
     in property <float> progress;
-    in property <string> eta;
+    in property <string> status;
     in property <[Written]> written;
     callback choose-file;
     callback remove-sample;
@@ -42,18 +39,13 @@ export component App inherits Window {
     default-font-weight: 400;
     min-width: 440px;
     max-width: 440px;
-    min-height: 588px;
-    max-height: 588px;
+    min-height: 560px;
+    max-height: 560px;
 
-    Rectangle {
-        y: 20px;
-        height: root.height - 20px;
+    VerticalLayout {
+        padding: Metrics.page;
 
         if root.view == View.pick: PickView {
-            x: 20px;
-            width: parent.width - 40px;
-            y: 0px;
-            height: parent.height - 20px;
             dragging: root.dragging;
             error: root.error;
             choose => {
@@ -62,13 +54,8 @@ export component App inherits Window {
         }
 
         if root.view == View.ready: ReadyView {
-            x: 20px;
-            width: parent.width - 40px;
-            y: 0px;
-            height: parent.height - 20px;
             name: root.name;
-            tags: root.tags;
-            steps: root.steps;
+            detail: root.detail;
             chips: root.chips;
             folder: root.folder;
             error: root.error;
@@ -87,17 +74,12 @@ export component App inherits Window {
         }
 
         if root.view == View.running || root.view == View.stopping: RunningView {
-            x: 20px;
-            width: parent.width - 40px;
-            y: 0px;
-            height: parent.height - 20px;
             name: root.name;
-            tags: root.tags;
-            stage: root.stage;
-            label: root.stage-label;
-            position: root.stage-position;
+            detail: root.detail;
+            steps: root.steps;
+            current: root.current;
             progress: root.progress;
-            eta: root.eta;
+            status: root.status;
             cancellable: root.view == View.running;
             cancel => {
                 root.cancel();
@@ -105,10 +87,6 @@ export component App inherits Window {
         }
 
         if root.view == View.done: DoneView {
-            x: 20px;
-            width: parent.width - 40px;
-            y: 0px;
-            height: parent.height - 20px;
             written: root.written;
             error: root.error;
             open-folder => {

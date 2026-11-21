@@ -1,6 +1,6 @@
-import { Gel } from "palette.slint";
+import { Gel, Metrics } from "palette.slint";
 import { Icon, Icons } from "icons.slint";
-import { Card, IconButton, Tag } from "controls.slint";
+import { Card, IconButton } from "controls.slint";
 
 export component Tile inherits Rectangle {
     in property <image> source;
@@ -9,9 +9,7 @@ export component Tile inherits Rectangle {
     width: root.size;
     height: root.size;
     border-radius: root.size * 0.3;
-    background: @linear-gradient(180deg, Gel.accent-wash.brighter(0.1) 0%, Gel.accent-wash 100%);
-    border-width: 1px;
-    border-color: Gel.accent-wash.darker(0.05);
+    background: Gel.accent-wash;
 
     Icon {
         source: root.source;
@@ -22,15 +20,15 @@ export component Tile inherits Rectangle {
 
 export component SampleCard inherits Card {
     in property <string> name;
-    in property <[string]> tags;
+    in property <string> detail;
     in property <bool> removable;
     callback remove;
 
-    height: 76px;
+    height: 72px;
 
     HorizontalLayout {
-        padding: 16px;
-        padding-right: root.removable ? 12px : 16px;
+        padding: Metrics.pad;
+        padding-right: root.removable ? 12px : Metrics.pad;
         spacing: 12px;
 
         Tile {
@@ -40,7 +38,7 @@ export component SampleCard inherits Card {
 
         VerticalLayout {
             alignment: center;
-            spacing: 6px;
+            spacing: 2px;
 
             Text {
                 text: root.name;
@@ -50,13 +48,11 @@ export component SampleCard inherits Card {
                 overflow: elide;
             }
 
-            HorizontalLayout {
-                spacing: 6px;
-                alignment: start;
-
-                for tag in root.tags: Tag {
-                    text: tag;
-                }
+            Text {
+                text: root.detail;
+                font-size: 12px;
+                color: Gel.ink-muted;
+                overflow: elide;
             }
         }
 

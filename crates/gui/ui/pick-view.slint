@@ -1,4 +1,4 @@
-import { Gel } from "palette.slint";
+import { Gel, Metrics } from "palette.slint";
 import { Icons } from "icons.slint";
 import { ErrorLine, PrimaryButton } from "controls.slint";
 import { Tile } from "sample-card.slint";
@@ -8,22 +8,22 @@ export component PickView inherits VerticalLayout {
     in property <string> error;
     callback choose;
 
-    spacing: 12px;
+    spacing: Metrics.pad;
 
     Rectangle {
         vertical-stretch: 1;
-        border-radius: 20px;
+        border-radius: Metrics.radius;
         border-width: 1px;
         border-color: root.dragging ? Gel.accent : Gel.line;
         background: root.dragging ? Gel.accent-wash : Gel.surface;
 
         VerticalLayout {
             alignment: center;
-            spacing: 8px;
+            spacing: Metrics.gap;
 
             HorizontalLayout {
                 alignment: center;
-                padding-bottom: 8px;
+                padding-bottom: Metrics.gap;
 
                 Tile {
                     source: Icons.new-file;

@@ -17,12 +17,12 @@ pub(crate) fn screen(app: &App, screen: &Screen) {
 		}
 		Screen::Running(prepared, _) => {
 			sample(app, prepared);
-			starting(app, prepared);
+			starting(app);
 			status(app, View::Running, None);
 		}
 		Screen::Stopping(prepared, _) => {
 			sample(app, prepared);
-			app.set_stage_label(STOPPING.into());
+			app.set_status(STOPPING.into());
 			status(app, View::Stopping, None);
 		}
 		Screen::Done(finished) => {
@@ -40,25 +40,22 @@ pub(crate) fn progress(app: &App, progress: Progress, fraction: f32) {
 	if app.get_view() != View::Running {
 		return;
 	}
-	app.set_stage(labels::step_kind(progress.stage));
-	app.set_stage_label(labels::activity(progress.stage).into());
-	app.set_stage_position(position(app, progress.stage).into());
+	app.set_current(current(app, progress.stage));
 	app.set_progress(fraction);
 	let percent = format!("{:.0}%", fraction * 100.0);
-	let eta = match progress.eta {
+	let status = match progress.eta {
 		Some(remaining) => format!("{percent} · {}", labels::eta(remaining)),
 		None => percent,
 	};
-	app.set_eta(eta.into());
+	app.set_status(status.into());
 }
 
-fn position(app: &App, stage: Stage) -> String {
-	let steps = app.get_steps();
+fn current(app: &App, stage: Stage) -> i32 {
 	let kind = labels::step_kind(stage);
-	steps
+	app.get_steps()
 		.iter()
 		.position(|step| step.kind == kind)
-		.map(|index| format!("Step {} of {}", index + 1, steps.row_count()))
+		.and_then(|index| i32::try_from(index).ok())
 		.unwrap_or_default()
 }
 
@@ -67,20 +64,16 @@ fn status(app: &App, view: View, error: Option<&str>) {
 	app.set_error(error.unwrap_or_default().into());
 }
 
-fn starting(app: &App, prepared: &Prepared) {
-	if let Some(&stage) = prepared.plan.stages.first() {
-		app.set_stage(labels::step_kind(stage));
-		app.set_stage_label(labels::activity(stage).into());
-		app.set_stage_position(position(app, stage).into());
-	}
+fn starting(app: &App) {
+	app.set_current(0);
 	app.set_progress(0.0);
-	app.set_eta(SharedString::new());
+	app.set_status(SharedString::new());
 }
 
 fn sample(app: &App, prepared: &Prepared) {
 	let plan = &prepared.plan;
 	app.set_name(plan.sample.name.as_str().into());
-	app.set_tags(tags(prepared));
+	app.set_detail(detail(prepared).into());
 	app.set_steps(model(
 		plan.stages
 			.iter()
@@ -94,7 +87,7 @@ fn sample(app: &App, prepared: &Prepared) {
 	app.set_folder(prepared.output.display().to_string().into());
 }
 
-fn tags(prepared: &Prepared) -> ModelRc<SharedString> {
+fn detail(prepared: &Prepared) -> String {
 	let plan = &prepared.plan;
 	let (kind, size) = match &plan.sample.source {
 		Source::Alignments(input) | Source::Variants(input) | Source::Reference(input) => {
@@ -112,9 +105,12 @@ fn tags(prepared: &Prepared) -> ModelRc<SharedString> {
 				.sum(),
 		),
 	};
-	let mut tags = vec![labels::kind(kind).into(), labels::size(size).into()];
-	tags.push(plan.build.name().into());
-	model(tags)
+	format!(
+		"{} · {} · {}",
+		labels::kind(kind),
+		labels::size(size),
+		plan.build.name()
+	)
 }
 
 fn chips(prepared: &Prepared) -> ModelRc<Chip> {

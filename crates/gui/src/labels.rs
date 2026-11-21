@@ -54,17 +54,6 @@ pub(crate) const fn step(stage: Stage) -> &'static str {
 	}
 }
 
-pub(crate) const fn activity(stage: Stage) -> &'static str {
-	match stage {
-		Stage::Reference => "Preparing reference…",
-		Stage::Index => "Indexing…",
-		Stage::Align => "Aligning reads…",
-		Stage::Sort => "Sorting reads…",
-		Stage::Call => "Finding variants…",
-		Stage::Export => "Writing raw data…",
-	}
-}
-
 pub(crate) fn size(bytes: u64) -> String {
 	SIZE_UNITS
 		.iter()

@@ -1,19 +1,19 @@
-import { Gel } from "palette.slint";
+import { Gel, Metrics } from "palette.slint";
 import { Icon, Icons } from "icons.slint";
-import { Caption, Card, ChipButton, ErrorLine, Pressable, PrimaryButton } from "controls.slint";
+import { Card, ErrorLine, Pressable, PrimaryButton, Section, Toggle } from "controls.slint";
 import { SampleCard } from "sample-card.slint";
-import { Chip, Step } from "types.slint";
+import { Chip } from "types.slint";
 
 component FolderRow inherits Card {
     in property <string> path;
     callback choose;
 
-    height: 52px;
+    height: Metrics.control + 8px;
 
     HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
-        spacing: 10px;
+        padding-left: Metrics.pad;
+        padding-right: Metrics.pad;
+        spacing: 12px;
 
         Icon {
             source: Icons.folder;
@@ -32,14 +32,13 @@ component FolderRow inherits Card {
         Text {
             text: "Change";
             font-size: 13px;
-            font-weight: 500;
+            font-weight: 600;
             color: Gel.accent-ink;
             vertical-alignment: center;
         }
     }
 
     Pressable {
-        radius: 14px;
         accessible-label: "Change Folder";
         clicked => {
             root.choose();
@@ -49,8 +48,7 @@ component FolderRow inherits Card {
 
 export component ReadyView inherits VerticalLayout {
     in property <string> name;
-    in property <[string]> tags;
-    in property <[Step]> steps;
+    in property <string> detail;
     in property <[Chip]> chips;
     in property <string> folder;
     in property <string> error;
@@ -59,57 +57,27 @@ export component ReadyView inherits VerticalLayout {
     callback choose-folder;
     callback start;
 
-    spacing: 12px;
+    spacing: Metrics.section;
 
     SampleCard {
         name: root.name;
-        tags: root.tags;
+        detail: root.detail;
         removable: true;
         remove => {
             root.remove();
         }
     }
 
-    Card {
-        VerticalLayout {
-            padding: 12px;
-            padding-left: 16px;
-            padding-right: 16px;
-            spacing: 2px;
-
-            for step in root.steps: HorizontalLayout {
-                height: 24px;
-                spacing: 10px;
-
-                Icon {
-                    source: Icons.step(step.kind);
-                    y: (parent.height - self.height) / 2;
-                }
-
-                Text {
-                    text: step.label;
-                    font-size: 13px;
-                    color: Gel.ink;
-                    vertical-alignment: center;
-                }
-            }
-        }
-    }
-
-    if root.chips.length > 0: VerticalLayout {
-        spacing: 6px;
-
-        Caption {
-            text: "Raw data formats";
-        }
+    if root.chips.length > 0: Section {
+        title: "Raw data formats";
 
         GridLayout {
-            spacing: 8px;
+            spacing: Metrics.gap;
 
-            for chip[index] in root.chips: ChipButton {
-                row: floor(index / 3);
-                col: mod(index, 3);
-                width: (root.width - 16px) / 3;
+            for chip[index] in root.chips: Toggle {
+                row: index < 3 ? 0 : 1;
+                col: index < 3 ? index * 2 : (index - 3) * 3;
+                colspan: index < 3 ? 2 : 3;
                 text: chip.label;
                 on: chip.on;
                 clicked => {
@@ -119,12 +87,8 @@ export component ReadyView inherits VerticalLayout {
         }
     }
 
-    VerticalLayout {
-        spacing: 6px;
-
-        Caption {
-            text: "Save to";
-        }
+    Section {
+        title: "Save to";
 
         FolderRow {
             path: root.folder;
@@ -134,18 +98,20 @@ export component ReadyView inherits VerticalLayout {
         }
     }
 
-    Rectangle {
+    VerticalLayout {
         vertical-stretch: 1;
-    }
+        alignment: end;
+        spacing: Metrics.pad;
 
-    if root.error != "": ErrorLine {
-        text: root.error;
-    }
+        if root.error != "": ErrorLine {
+            text: root.error;
+        }
 
-    PrimaryButton {
-        text: "Start";
-        clicked => {
-            root.start();
+        PrimaryButton {
+            text: "Start";
+            clicked => {
+                root.start();
+            }
         }
     }
 }

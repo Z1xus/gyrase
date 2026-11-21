@@ -1,6 +1,6 @@
-import { Gel } from "palette.slint";
+import { Gel, Metrics } from "palette.slint";
 import { Icon, Icons } from "icons.slint";
-import { Card, ErrorLine, PrimaryButton, TextButton } from "controls.slint";
+import { Card, ErrorLine, PrimaryButton, SecondaryButton, Section } from "controls.slint";
 import { Written } from "types.slint";
 
 export component DoneView inherits VerticalLayout {
@@ -9,90 +9,92 @@ export component DoneView inherits VerticalLayout {
     callback open-folder;
     callback again;
 
-    spacing: 12px;
+    spacing: Metrics.section;
 
-    VerticalLayout {
-        alignment: center;
-        spacing: 8px;
-        padding-top: 16px;
-        padding-bottom: 8px;
+    HorizontalLayout {
+        spacing: 12px;
+        height: 72px;
 
-        HorizontalLayout {
-            alignment: center;
-
-            Icon {
-                source: Icons.done;
-                size: 40px;
-                tint: Gel.accent;
-            }
+        Icon {
+            source: Icons.done;
+            size: 32px;
+            tint: Gel.accent;
+            y: (parent.height - self.height) / 2;
         }
 
         Text {
             text: "Your files are ready";
-            font-size: 22px;
+            font-size: 20px;
             font-weight: 600;
             color: Gel.ink;
-            horizontal-alignment: center;
+            vertical-alignment: center;
         }
     }
 
-    Card {
-        VerticalLayout {
-            padding: 8px;
+    Section {
+        title: "Files";
 
-            for entry in root.written: HorizontalLayout {
-                height: 36px;
-                padding-left: 8px;
-                padding-right: 8px;
-                spacing: 10px;
+        Card {
+            VerticalLayout {
+                padding: Metrics.pad;
+                padding-top: 10px;
+                padding-bottom: 10px;
 
-                Icon {
-                    source: entry.raw ? Icons.file : Icons.dna;
-                    y: (parent.height - self.height) / 2;
-                }
+                for entry in root.written: HorizontalLayout {
+                    height: Metrics.row + 4px;
+                    spacing: 12px;
 
-                Text {
-                    text: entry.name;
-                    horizontal-stretch: 1;
-                    font-size: 13px;
-                    color: Gel.ink;
-                    overflow: elide;
-                    vertical-alignment: center;
-                }
+                    Icon {
+                        source: entry.raw ? Icons.file : Icons.dna;
+                        y: (parent.height - self.height) / 2;
+                    }
 
-                Text {
-                    text: entry.detail;
-                    font-family: "Geist Mono";
-                    font-size: 11px;
-                    color: Gel.ink-muted;
-                    vertical-alignment: center;
+                    Text {
+                        text: entry.name;
+                        horizontal-stretch: 1;
+                        font-size: 13px;
+                        color: Gel.ink;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: entry.detail;
+                        font-size: 12px;
+                        color: Gel.ink-muted;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }
     }
 
-    Rectangle {
+    VerticalLayout {
         vertical-stretch: 1;
-    }
+        alignment: end;
+        spacing: Metrics.pad;
 
-    if root.error != "": ErrorLine {
-        text: root.error;
-    }
-
-    PrimaryButton {
-        text: "Open Folder";
-        clicked => {
-            root.open-folder();
+        if root.error != "": ErrorLine {
+            text: root.error;
         }
-    }
 
-    HorizontalLayout {
-        alignment: center;
+        HorizontalLayout {
+            spacing: Metrics.gap;
 
-        TextButton {
-            text: "Another File";
-            clicked => {
-                root.again();
+            SecondaryButton {
+                horizontal-stretch: 1;
+                text: "Another File";
+                clicked => {
+                    root.again();
+                }
+            }
+
+            PrimaryButton {
+                horizontal-stretch: 1;
+                text: "Open Folder";
+                clicked => {
+                    root.open-folder();
+                }
             }
         }
     }

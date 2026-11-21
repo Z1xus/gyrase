@@ -1,79 +1,82 @@
-import { Gel } from "palette.slint";
-import { Icons } from "icons.slint";
-import { ProgressBar, TextButton } from "controls.slint";
-import { SampleCard, Tile } from "sample-card.slint";
-import { StepKind } from "types.slint";
+import { Gel, Metrics } from "palette.slint";
+import { Icon, Icons } from "icons.slint";
+import { Card, ProgressBar, SecondaryButton, Section } from "controls.slint";
+import { SampleCard } from "sample-card.slint";
+import { Step } from "types.slint";
 
 export component RunningView inherits VerticalLayout {
     in property <string> name;
-    in property <[string]> tags;
-    in property <StepKind> stage;
-    in property <string> label;
-    in property <string> position;
+    in property <string> detail;
+    in property <[Step]> steps;
+    in property <int> current;
     in property <float> progress;
-    in property <string> eta;
+    in property <string> status;
     in property <bool> cancellable;
     callback cancel;
 
-    spacing: 12px;
+    spacing: Metrics.section;
 
     SampleCard {
         name: root.name;
-        tags: root.tags;
+        detail: root.detail;
+    }
+
+    Section {
+        title: "Progress";
+
+        Card {
+            VerticalLayout {
+                padding: Metrics.pad;
+                padding-top: 10px;
+                padding-bottom: 10px;
+
+                for step[index] in root.steps: HorizontalLayout {
+                    height: Metrics.row;
+                    spacing: 12px;
+
+                    Icon {
+                        source: Icons.step(step.kind);
+                        tint: index <= root.current ? Gel.accent : Gel.ink-muted;
+                        opacity: index > root.current ? 0.5 : 1;
+                        y: (parent.height - self.height) / 2;
+                    }
+
+                    Text {
+                        text: step.label;
+                        horizontal-stretch: 1;
+                        font-size: 13px;
+                        font-weight: index == root.current ? 600 : 400;
+                        color: index == root.current ? Gel.ink : Gel.ink-muted;
+                        opacity: index > root.current ? 0.5 : 1;
+                        vertical-alignment: center;
+                    }
+                }
+
+                VerticalLayout {
+                    padding-top: 12px;
+                    spacing: Metrics.gap;
+
+                    ProgressBar {
+                        value: root.progress;
+                    }
+
+                    Text {
+                        text: root.status;
+                        font-size: 12px;
+                        color: Gel.ink-muted;
+                        min-height: 16px;
+                    }
+                }
+            }
+        }
     }
 
     VerticalLayout {
         vertical-stretch: 1;
-        alignment: center;
-        spacing: 16px;
+        alignment: end;
 
-        HorizontalLayout {
-            alignment: center;
-
-            Tile {
-                source: Icons.step(root.stage);
-                size: 64px;
-            }
-        }
-
-        Text {
-            text: root.position;
-            font-size: 12px;
-            font-weight: 500;
-            color: Gel.ink-muted;
-            horizontal-alignment: center;
-            min-height: 16px;
-        }
-
-        Text {
-            text: root.label;
-            font-size: 20px;
-            font-weight: 600;
-            color: Gel.ink;
-            horizontal-alignment: center;
-        }
-
-        ProgressBar {
-            value: root.progress;
-        }
-
-        Text {
-            text: root.eta;
-            font-family: "Geist Mono";
-            font-size: 12px;
-            color: Gel.ink-muted;
-            horizontal-alignment: center;
-            min-height: 16px;
-        }
-    }
-
-    HorizontalLayout {
-        alignment: center;
-        height: 44px;
-
-        if root.cancellable: TextButton {
+        if root.cancellable: SecondaryButton {
             text: "Cancel";
-            y: (parent.height - self.height) / 2;
             clicked => {
                 root.cancel();
             }
