@@ -5,18 +5,19 @@ use memchr::memchr;
 use super::batch::{FastqBatch, Span};
 use crate::error::{Error, FastqError};
 
-const MAX_BATCH_BYTES: usize = 1 << 30;
+const MAX_RECORD_BYTES: usize = 1 << 28;
+const MIN_REFILL_BYTES: usize = 1 << 16;
 
 #[derive(Debug)]
 pub struct FastqReader<R: BufRead> {
 	source: R,
 	records_read: u64,
+	carry: Vec<u8>,
 }
 
 enum Refill {
 	More,
 	Done,
-	Full,
 }
 
 struct Lines {
@@ -32,6 +33,7 @@ impl<R: BufRead> FastqReader<R> {
 		Self {
 			source,
 			records_read: 0,
+			carry: Vec::new(),
 		}
 	}
 
@@ -40,17 +42,39 @@ impl<R: BufRead> FastqReader<R> {
 		batch: &mut FastqBatch,
 		max_records: usize,
 	) -> Result<usize, Error> {
-		batch.restart();
-		self.fill(batch, max_records, MAX_BATCH_BYTES)
+		self.begin(batch);
+		let records = self.fill(batch, max_records)?;
+		self.end(batch);
+		Ok(records)
 	}
 
-	pub(super) fn read_records(
+	pub(super) fn begin(&mut self, batch: &mut FastqBatch) {
+		batch.restart();
+		batch.data.append(&mut self.carry);
+	}
+
+	pub(super) fn end(&mut self, batch: &mut FastqBatch) {
+		self.carry.extend_from_slice(&batch.data[batch.consumed..]);
+		batch.data.truncate(batch.consumed);
+	}
+
+	pub(super) fn fill(
 		&mut self,
 		batch: &mut FastqBatch,
-		records: usize,
+		max_records: usize,
 	) -> Result<usize, Error> {
-		batch.restart();
-		self.fill(batch, records, usize::MAX)
+		while batch.len() < max_records && !batch.is_full() {
+			if !self.read_next(batch)? {
+				break;
+			}
+		}
+		Ok(batch.len())
+	}
+
+	pub(super) fn read_next(&mut self, batch: &mut FastqBatch) -> Result<bool, Error> {
+		let before = batch.len();
+		self.read_more(batch, before + 1)?;
+		Ok(batch.len() > before)
 	}
 
 	pub(super) fn read_more(
@@ -58,17 +82,8 @@ impl<R: BufRead> FastqReader<R> {
 		batch: &mut FastqBatch,
 		records: usize,
 	) -> Result<usize, Error> {
-		self.fill(batch, records, usize::MAX)
-	}
-
-	fn fill(
-		&mut self,
-		batch: &mut FastqBatch,
-		max_records: usize,
-		max_bytes: usize,
-	) -> Result<usize, Error> {
 		let mut source_done = false;
-		while batch.len() < max_records {
+		while batch.len() < records {
 			let record = self.records_read + 1;
 			let parsed = parse_record(&batch.data, batch.consumed, source_done, record)?;
 			match parsed {
@@ -86,34 +101,39 @@ impl<R: BufRead> FastqReader<R> {
 					}
 					break;
 				}
-				None => match self.refill(batch, max_bytes)? {
+				None => match self.refill(batch)? {
 					Refill::More => {}
 					Refill::Done => source_done = true,
-					Refill::Full => break,
 				},
 			}
 		}
 		Ok(batch.len())
 	}
 
-	fn refill(&mut self, batch: &mut FastqBatch, max_bytes: usize) -> Result<Refill, Error> {
-		let chunk = self.source.fill_buf()?;
-		if chunk.is_empty() {
-			return Ok(Refill::Done);
-		}
-		if batch.data.len().saturating_add(chunk.len()) > max_bytes {
-			if batch.is_empty() {
+	fn refill(&mut self, batch: &mut FastqBatch) -> Result<Refill, Error> {
+		let target = ((batch.data.len() - batch.consumed) * 2).max(MIN_REFILL_BYTES);
+		let mut added = false;
+		while batch.data.len() - batch.consumed < target {
+			let chunk = self.source.fill_buf()?;
+			if chunk.is_empty() {
+				break;
+			}
+			let room = MAX_RECORD_BYTES.saturating_sub(batch.data.len() - batch.consumed);
+			if room == 0 {
+				if added {
+					break;
+				}
 				return Err(FastqError::RecordTooLarge {
 					record: self.records_read + 1,
 				}
 				.into());
 			}
-			return Ok(Refill::Full);
+			let taken = chunk.len().min(room);
+			batch.data.extend_from_slice(&chunk[..taken]);
+			self.source.consume(taken);
+			added = true;
 		}
-		batch.data.extend_from_slice(chunk);
-		let taken = chunk.len();
-		self.source.consume(taken);
-		Ok(Refill::More)
+		Ok(if added { Refill::More } else { Refill::Done })
 	}
 }
 

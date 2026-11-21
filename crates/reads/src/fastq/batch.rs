@@ -1,3 +1,5 @@
+const MAX_BATCH_BYTES: usize = 1 << 30;
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Span {
 	pub name_start: u32,
@@ -60,6 +62,10 @@ impl FastqBatch {
 
 	pub fn iter(&self) -> impl Iterator<Item = ReadRef<'_>> {
 		(0..self.len()).filter_map(|index| self.get(index))
+	}
+
+	pub(super) fn is_full(&self) -> bool {
+		!self.spans.is_empty() && self.data.len() >= MAX_BATCH_BYTES
 	}
 
 	pub(super) fn restart(&mut self) {

@@ -58,14 +58,24 @@ impl<R1: BufRead, R2: BufRead> PairedFastq<R1, R2> {
 		batch: &mut PairedBatch,
 		max_pairs: usize,
 	) -> Result<usize, Error> {
-		let first = self.first.read_records(&mut batch.first, max_pairs)?;
-		let second = self.second.read_records(&mut batch.second, max_pairs)?;
-		if first != second {
-			return Err(FastqError::PairCount.into());
+		self.first.begin(&mut batch.first);
+		self.second.begin(&mut batch.second);
+		while batch.len() < max_pairs && !batch.first.is_full() && !batch.second.is_full() {
+			let first = self.first.read_next(&mut batch.first)?;
+			let second = self.second.read_next(&mut batch.second)?;
+			if first != second {
+				return Err(FastqError::PairCount.into());
+			}
+			if !first {
+				break;
+			}
 		}
+		self.first.end(&mut batch.first);
+		self.second.end(&mut batch.second);
 		check_names(batch.pairs(), self.pairs_read)?;
-		self.pairs_read += u64::try_from(first).unwrap_or(0);
-		Ok(first)
+		let pairs = batch.len();
+		self.pairs_read += u64::try_from(pairs).unwrap_or(0);
+		Ok(pairs)
 	}
 }
 
@@ -84,10 +94,12 @@ impl<R: BufRead> InterleavedFastq<R> {
 	}
 
 	pub fn read_batch(&mut self, batch: &mut FastqBatch, max_pairs: usize) -> Result<usize, Error> {
-		let mut reads = self.reader.read_batch(batch, max_pairs.saturating_mul(2))?;
+		self.reader.begin(batch);
+		let mut reads = self.reader.fill(batch, max_pairs.saturating_mul(2))?;
 		if reads % 2 != 0 {
 			reads = self.reader.read_more(batch, reads + 1)?;
 		}
+		self.reader.end(batch);
 		if reads % 2 != 0 {
 			return Err(FastqError::PairCount.into());
 		}
