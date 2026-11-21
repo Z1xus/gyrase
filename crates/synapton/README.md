@@ -66,13 +66,13 @@ Conditions: 2,500,000 paired-end reads (5,000,000 reads, 151 bp) from HG002 Nova
 
 | Aligner | Wall time (chr20) | Speed (chr20) | Peak RSS (chr20) | Agreement in GIAB BED (chr20) | Misplaced at MAPQ >= 20 |
 | --- | --- | --- | --- | --- | --- |
-| synapton (CPU) | 14.91 s | 335,345 reads/s | 316 MiB | 99.950% | 0.021% |
-| synapton (GPU, `gpu` feature) | 12.06 s | 414,594 reads/s | 710 MiB | 99.950% | 0.021% |
+| synapton (CPU) | 14.91 s | 335,345 reads/s | 316 MiB | 99.950% | 0.029% |
+| synapton (GPU, `gpu` feature) | 12.06 s | 414,594 reads/s | 710 MiB | 99.950% | 0.029% |
 | strobealign 0.20.0 | 15.92 s | 314,070 reads/s | 530 MiB | 99.858% | 0.158% |
 | minimap2 2.31 | 45.06 s | 110,963 reads/s | 928 MiB | 99.499% | 0.077% |
 | bwa-mem2 2.2.1 | 76.33 s | 65,505 reads/s | 3,766 MiB | 99.995% | 0.023% |
 
-These numbers are for chromosome 20 only. On this chromosome 20 test, `synapton` (CPU) is about 1.07 times faster than `strobealign`, 3.0 times faster than `minimap2` and 5.1 times faster than `bwa-mem2`, and uses less memory than all three. `bwa-mem2` has higher placement agreement with the original bwa-mem BAM (99.995% vs 99.950% in GIAB high-confidence regions). `synapton` has fewer misplaced reads at MAPQ 20 or more (0.021% vs 0.023% for `bwa-mem2`, 0.077% for `minimap2` and 0.158% for `strobealign`), while assigning MAPQ 20 or more to 91.8% of mapped reads (vs 94.0% for `bwa-mem2`).
+These numbers are for chromosome 20 only. On this chromosome 20 test, `synapton` (CPU) is about 1.07 times faster than `strobealign`, 3.0 times faster than `minimap2` and 5.1 times faster than `bwa-mem2`, and uses less memory than all three. `bwa-mem2` has higher placement agreement with the original bwa-mem BAM (99.995% vs 99.950% in GIAB high-confidence regions). `synapton` has fewer misplaced reads at MAPQ 20 or more than `minimap2` and `strobealign` (0.029% vs 0.077% and 0.158%) and slightly more than `bwa-mem2` (0.023%), while assigning MAPQ 20 or more to 92.2% of mapped reads (vs 94.0% for `bwa-mem2`).
 
 ## License
 
