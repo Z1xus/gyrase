@@ -35,7 +35,6 @@ const UNIQUE_MARGIN: i32 = 10;
 const MAX_MATE_BOOST: u8 = 40;
 const MIN_PAIRED_SCORE: i32 = 19;
 const MIN_FAST_LENGTH: usize = 64;
-const FAST_DIAGONALS: usize = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Front<'f> {
@@ -315,7 +314,8 @@ impl<'a> Worker<'a> {
 		}
 		self.mapper.locate(end % 2, &mut self.diagonals);
 		let reference = self.index.reference();
-		for diagonal in self.diagonals.iter().take(FAST_DIAGONALS) {
+		let mut found = None;
+		for diagonal in &self.diagonals {
 			let Ok(start) = u64::try_from(diagonal.start) else {
 				continue;
 			};
@@ -333,17 +333,21 @@ impl<'a> Worker<'a> {
 			) else {
 				continue;
 			};
-			if self.index.certified(start, query.length) {
-				return Some(Placed {
-					strand: diagonal.strand,
-					contig,
-					span,
-					flat: diagonal.start,
-					score,
-				});
+			if found.is_some() {
+				return None;
 			}
+			found = Some(Placed {
+				strand: diagonal.strand,
+				contig,
+				span,
+				flat: diagonal.start,
+				score,
+			});
 		}
-		None
+		let placed = found?;
+		self.index
+			.certified(u64_of(placed.flat), query.length)
+			.then_some(placed)
 	}
 
 	fn find_mate(
