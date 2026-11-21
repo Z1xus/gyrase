@@ -249,6 +249,12 @@ pub struct TagIter<'a> {
 	rest: &'a [u8],
 }
 
+impl TagIter<'_> {
+	pub(super) fn remaining(&self) -> usize {
+		self.rest.len()
+	}
+}
+
 impl<'a> Iterator for TagIter<'a> {
 	type Item = Result<Field<'a>, RecordError>;
 

@@ -150,6 +150,9 @@ impl Record {
 		if ops.iter().any(|op| op.len() > MAX_OP_LEN) {
 			return Err(RecordError::CigarLengthTooLarge);
 		}
+		if self.view().has_long_cigar() {
+			self.remove_tags(LONG_CIGAR_TAG);
+		}
 		let encoded = ops.iter().flat_map(|op| op.raw().to_le_bytes());
 		self.tail
 			.splice(self.layout.name_end..self.layout.cigar_end, encoded)
@@ -181,6 +184,7 @@ impl Record {
 		let [Some(clip), Some(skip)] = placeholder else {
 			return Err(RecordError::CigarLengthTooLarge);
 		};
+		self.remove_tags(LONG_CIGAR_TAG);
 		self.set_cigar(&[clip, skip])?;
 		let mut array = self.begin_array::<u32>(LONG_CIGAR_TAG);
 		for op in ops {
@@ -199,6 +203,11 @@ impl Record {
 			.filter(|&len| i32::try_from(len).is_ok())
 			.ok_or(RecordError::SequenceTooLong)?;
 		check_qualities(bases.len(), qualities)?;
+		let long_cigar = self.view().has_long_cigar();
+		let clip = CigarOp::new(seq_len, CigarKind::SoftClip);
+		if long_cigar && clip.is_none() {
+			return Err(RecordError::CigarLengthTooLarge);
+		}
 		let packed = bases.chunks(2).map(|pair| match *pair {
 			[high, low] => Code4::from_ascii(high).code() << 4 | Code4::from_ascii(low).code(),
 			[high] => Code4::from_ascii(high).code() << 4,
@@ -216,7 +225,34 @@ impl Record {
 			self.layout.name_end,
 			fixed::cigar_ops(&self.core),
 			bases.len(),
-		)
+		)?;
+		if let (true, Some(clip)) = (long_cigar, clip) {
+			let at = self.layout.name_end;
+			if let Some(slot) = self.tail.get_mut(at..at + 4) {
+				slot.copy_from_slice(&clip.raw().to_le_bytes());
+			}
+		}
+		Ok(())
+	}
+
+	fn remove_tags(&mut self, tag: [u8; 2]) {
+		let start = self.layout.qual_end;
+		let total = self.tail.len() - start;
+		let mut found = Vec::new();
+		let mut fields = self.view().tags().iter();
+		loop {
+			let from = total - fields.remaining();
+			match fields.next() {
+				Some(Ok(field)) if field.tag == tag => {
+					found.push(start + from..start + total - fields.remaining());
+				}
+				Some(Ok(_)) => {}
+				_ => break,
+			}
+		}
+		for range in found.into_iter().rev() {
+			self.tail.drain(range);
+		}
 	}
 
 	pub fn clear_tags(&mut self) {
