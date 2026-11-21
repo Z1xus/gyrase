@@ -5,7 +5,8 @@ use gyrase_genome::ContigId;
 use crate::alignment::Strand;
 use crate::config::Scoring;
 
-const MAX_UNGAPPED_MISMATCHES: u32 = 8;
+const MAX_UNGAPPED_MISMATCHES: i32 = 2;
+const END_MARGIN: usize = 10;
 const DUPLICATE_OVERLAP_DIVISOR: u32 = 2;
 
 #[derive(Debug, Clone)]
@@ -115,34 +116,27 @@ pub(crate) fn ungapped(scoring: &Scoring, query: &[u8], reference: &[u8]) -> Opt
 	if query.len() != reference.len() {
 		return None;
 	}
-	let matched = i32::from(scoring.matched);
-	let mismatch = i32::from(scoring.mismatch);
-	let clip = i32::from(scoring.clip);
-	let mut mismatches = 0u32;
-	let mut prefix = 0i32;
-	for (&q, &r) in query.iter().zip(reference) {
+	let mut mismatches = 0i32;
+	let mut interior = true;
+	for (index, (&q, &r)) in query.iter().zip(reference).enumerate() {
 		if q > 3 || r > 3 {
 			return None;
 		}
-		if q == r {
-			prefix += matched;
-		} else {
-			prefix -= mismatch;
+		if q != r {
 			mismatches += 1;
 			if mismatches > MAX_UNGAPPED_MISMATCHES {
 				return None;
 			}
-		}
-		if prefix <= -clip {
-			return None;
+			interior &= index >= END_MARGIN && index + END_MARGIN < query.len();
 		}
 	}
-	let mut suffix = 0i32;
-	for (&q, &r) in query.iter().zip(reference).rev() {
-		suffix += if q == r { matched } else { -mismatch };
-		if suffix <= -clip {
-			return None;
-		}
+	if mismatches == MAX_UNGAPPED_MISMATCHES && !interior {
+		return None;
 	}
-	Some(Ungapped { score: prefix })
+	let matched = i32::from(scoring.matched);
+	let penalty = matched + i32::from(scoring.mismatch);
+	let length = i32::try_from(query.len()).ok()?;
+	Some(Ungapped {
+		score: length * matched - mismatches * penalty,
+	})
 }
