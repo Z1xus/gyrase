@@ -1,15 +1,25 @@
+mod alignments;
+mod calling;
 mod cancel;
 mod error;
+mod export;
 mod input;
+mod plan;
 mod progress;
 mod resources;
 mod sample;
 mod store;
+mod vcf;
 
+pub use alignments::Alignments;
+pub use calling::{Calling, Shard, Survey, Target, shards};
 pub use cancel::Cancel;
 pub use error::Error;
+pub use export::Targets;
 pub use input::{Input, Kind};
+pub use plan::{Outputs, Plan, Report, Request};
 pub use progress::{Estimate, Progress, Stage};
 pub use resources::Resources;
 pub use sample::{Lane, Sample, Source, samples};
 pub use store::{Download, Store};
+pub use vcf::Vcf;

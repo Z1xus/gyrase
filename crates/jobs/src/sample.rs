@@ -29,6 +29,19 @@ pub struct Sample {
 	pub source: Source,
 }
 
+impl Sample {
+	pub fn path(&self) -> &Path {
+		match &self.source {
+			Source::Alignments(input) | Source::Variants(input) | Source::Reference(input) => {
+				&input.path
+			}
+			Source::Reads(lanes) => lanes.first().map_or(Path::new(""), |lane| match lane {
+				Lane::Single(input) | Lane::Paired(input, _) => &input.path,
+			}),
+		}
+	}
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mate {
 	First,

@@ -8,9 +8,16 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-flate2.workspace = true
+gyrase-call.workspace = true
+gyrase-extract.workspace = true
 gyrase-genome.workspace = true
+gyrase-index.workspace = true
 gyrase-io.workspace = true
+gyrase-pileup.workspace = true
+gyrase-reads.workspace = true
+gyrase-variants.workspace = true
+flate2.workspace = true
+rayon.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
 ureq.workspace = true

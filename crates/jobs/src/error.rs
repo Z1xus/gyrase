@@ -24,6 +24,26 @@ pub enum Error {
 	Mismatch(gyrase_genome::Build),
 	#[error(transparent)]
 	Genome(#[from] gyrase_genome::Error),
+	#[error("{0}: no BAM or CRAM index next to it")]
+	MissingIndex(PathBuf),
+	#[error("{0}: not a BAM or CRAM file")]
+	NotAlignments(PathBuf),
+	#[error("contig missing from the reference")]
+	UnknownContig,
+	#[error(transparent)]
+	Io(#[from] gyrase_io::Error),
+	#[error(transparent)]
+	Reads(#[from] gyrase_reads::Error),
+	#[error(transparent)]
+	Cram(#[from] gyrase_reads::cram::Error),
+	#[error(transparent)]
+	Record(#[from] gyrase_reads::RecordError),
+	#[error(transparent)]
+	Index(#[from] gyrase_index::Error),
+	#[error(transparent)]
+	Variants(#[from] gyrase_variants::Error),
+	#[error(transparent)]
+	Extract(#[from] gyrase_extract::Error),
 	#[error("cancelled")]
 	Cancelled,
 }
