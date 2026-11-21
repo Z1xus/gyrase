@@ -86,7 +86,7 @@ impl Header {
 			.iter()
 			.map(|text| parse_line(text.trim_end()))
 			.collect::<Result<Vec<_>, _>>()?;
-		let has_pass = parsed.iter().any(|line| {
+		let pass = parsed.iter().position(|line| {
 			line.line.kind == LineKind::Filter && line.line.id.as_deref() == Some("PASS")
 		});
 		let first_slot_claimed = parsed.iter().any(|line| {
@@ -95,13 +95,14 @@ impl Header {
 				LineKind::Info | LineKind::Format | LineKind::Filter
 			) && line.explicit_index == Some(0)
 		});
-		if !has_pass {
-			let pass = parse_line(PASS_LINE)?;
-			if first_slot_claimed {
-				parsed.push(pass);
-			} else {
-				parsed.insert(1, pass);
+		match (pass, first_slot_claimed) {
+			(Some(at), false) => {
+				let line = parsed.remove(at);
+				parsed.insert(1, line);
 			}
+			(None, false) => parsed.insert(1, parse_line(PASS_LINE)?),
+			(None, true) => parsed.push(parse_line(PASS_LINE)?),
+			(Some(_), true) => {}
 		}
 		for line in parsed {
 			header.add_line(line, &mut seen)?;
