@@ -1,5 +1,5 @@
 use gyrase_call::{Call, Genotype as Called};
-use gyrase_extract::{Allele, CallBuild, Genotype, Panel, SiteCall};
+use gyrase_extract::{Allele, CallBuild, Genotype, Orientation, Panel, SiteCall};
 use gyrase_genome::{Base, Chromosome, ContigId};
 
 use crate::{Alignments, Target};
@@ -26,14 +26,18 @@ impl Targets {
 			.enumerate()
 			.filter_map(|(index, site)| {
 				site.reference()?;
-				let position = match build {
-					CallBuild::Grch37 => Some(site.grch37()),
-					CallBuild::Grch38 => site.grch38(),
-				}?;
+				let (position, flip) = match build {
+					CallBuild::Grch37 => (site.grch37(), false),
+					CallBuild::Grch38 => {
+						(site.grch38()?, site.orientation() == Orientation::Opposite)
+					}
+				};
 				let target = Target {
 					contig: contigs[site.chromosome().index()]?,
 					position: u64::from(position.checked_sub(1)?),
-					alternate: site.alternate(),
+					alternate: site
+						.alternate()
+						.map(|base| if flip { base.complement() } else { base }),
 				};
 				Some((target, index))
 			})
