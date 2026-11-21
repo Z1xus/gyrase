@@ -17,6 +17,7 @@ pub struct SexEvidence {
 	pub x_panel_heterozygous_fraction: f64,
 }
 
+const MALE_X_RATIO_MIN: f64 = 0.25;
 const MALE_X_RATIO_MAX: f64 = 0.75;
 const FEMALE_X_RATIO_MIN: f64 = 0.85;
 const MALE_Y_RATIO_MIN: f64 = 0.10;
@@ -47,7 +48,7 @@ pub fn infer_sex(evidence: SexEvidence) -> SexCall {
 	let votes = [
 		vote(
 			evidence.x_depth_ratio,
-			|ratio| ratio <= MALE_X_RATIO_MAX,
+			|ratio| (MALE_X_RATIO_MIN..=MALE_X_RATIO_MAX).contains(&ratio),
 			|ratio| ratio >= FEMALE_X_RATIO_MIN,
 		),
 		vote(

@@ -5,7 +5,7 @@ use gyrase_io::{Workers, decode};
 
 use super::bytes::{Bytes, unzigzag};
 use super::write::{ALLELE_SHIFT, MAGIC, ORIENTATION_BIT, RESERVED_BITS, VERSION};
-use super::{MAX_SITES, Panel};
+use super::{MAX_SITES, Panel, valid_name};
 
 use crate::site::NameCode;
 use crate::{Chip, ChipSet, Error, Orientation, Site};
@@ -68,6 +68,9 @@ impl Panel {
 			let len = usize::from(bytes.u8()?);
 			let name = std::str::from_utf8(bytes.take(len)?)
 				.map_err(|_| Error::Corrupt("name encoding"))?;
+			if !valid_name(name) {
+				return Err(Error::InvalidName(name.to_owned()));
+			}
 			names.push(Box::from(name));
 		}
 		let mut counts = [0usize; Chromosome::COUNT];
@@ -107,8 +110,11 @@ impl Panel {
 				offset = offset
 					.checked_add(unzigzag(offsets.varint()?))
 					.ok_or(Error::Corrupt("offset"))?;
-				let grch37 = u32::try_from(i64::from(grch38) + offset)
-					.map_err(|_| Error::Corrupt("grch37 position"))?;
+				let grch37 = i64::from(grch38)
+					.checked_add(offset)
+					.and_then(|position| u32::try_from(position).ok())
+					.filter(|position| *position != 0)
+					.ok_or(Error::Corrupt("grch37 position"))?;
 				let name = decode_name(name_codes.varint()?, names.len())?;
 				let packed = alleles.u8()?;
 				if packed & RESERVED_BITS != 0 {

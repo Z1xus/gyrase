@@ -36,8 +36,11 @@ impl Panel {
 		let mut names: Vec<Box<str>> = Vec::new();
 		let mut sites = Vec::with_capacity(entries.len());
 		for entry in &entries {
-			if entry.name.is_empty() || entry.name.len() > MAX_NAME_LEN {
+			if !valid_name(&entry.name) {
 				return Err(Error::InvalidName(entry.name.clone()));
+			}
+			if entry.grch37 == 0 {
+				return Err(Error::InvalidPosition(entry.name.clone()));
 			}
 			if !seen.insert((entry.chromosome, entry.grch37, entry.name.as_str())) {
 				return Err(Error::DuplicateSite {
@@ -94,6 +97,10 @@ impl Panel {
 			.enumerate()
 			.filter(move |(_, site)| site.chips.contains(chip))
 	}
+}
+
+fn valid_name(name: &str) -> bool {
+	!name.is_empty() && name.len() <= MAX_NAME_LEN && !name.contains(['\t', ',', '"', '\r', '\n'])
 }
 
 fn intern(

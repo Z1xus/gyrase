@@ -10,10 +10,12 @@ pub enum Ploidy {
 }
 
 pub fn in_x_par(grch37: u32) -> bool {
-	Build::Grch37
-		.pseudoautosomal()
-		.iter()
-		.any(|range| range.contains(&(u64::from(grch37) - 1)))
+	grch37.checked_sub(1).is_some_and(|zero_based| {
+		Build::Grch37
+			.pseudoautosomal()
+			.iter()
+			.any(|range| range.contains(&u64::from(zero_based)))
+	})
 }
 
 pub fn expected_ploidy(sex: Sex, chromosome: Chromosome, grch37: u32) -> Ploidy {

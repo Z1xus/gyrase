@@ -18,6 +18,8 @@ pub enum Error {
 	TooManySites(usize),
 	#[error("invalid site name {0:?}")]
 	InvalidName(String),
+	#[error("invalid position for site {0:?}")]
+	InvalidPosition(String),
 	#[error("duplicate site {name} at {chromosome}:{position}")]
 	DuplicateSite {
 		name: String,
