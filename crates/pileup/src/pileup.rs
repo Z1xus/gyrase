@@ -1,8 +1,8 @@
 use std::mem;
 use std::num::NonZeroU32;
 
-use gyrase_genome::{Base, Interval};
-use gyrase_reads::{CigarKind, RecordRef};
+use gyrase_genome::{Base, Code4, Interval};
+use gyrase_reads::{CigarKind, CigarOp, RecordRef};
 
 use crate::column::merge_mates;
 use crate::indel::{left_align_deletion, left_align_insertion};
@@ -139,6 +139,39 @@ impl Scratch {
 				record.flags().bits(),
 			)
 		});
+		for tied in records.chunk_by_mut(|first, second| {
+			first.position() == second.position()
+				&& first.flags() == second.flags()
+				&& fragment_id(first.name()) == fragment_id(second.name())
+		}) {
+			tied.sort_by(|first, second| {
+				first
+					.name()
+					.cmp(second.name())
+					.then_with(|| {
+						first
+							.cigar()
+							.ops()
+							.map(CigarOp::raw)
+							.cmp(second.cigar().ops().map(CigarOp::raw))
+					})
+					.then_with(|| first.mapq().cmp(&second.mapq()))
+					.then_with(|| first.mate_position().cmp(&second.mate_position()))
+					.then_with(|| {
+						first
+							.sequence()
+							.codes()
+							.map(Code4::code)
+							.cmp(second.sequence().codes().map(Code4::code))
+					})
+					.then_with(|| {
+						first
+							.qualities()
+							.as_phred()
+							.cmp(second.qualities().as_phred())
+					})
+			});
+		}
 		let span = usize::try_from(interval.len()).unwrap_or(0);
 		self.indels.clear();
 		self.inserted.clear();
