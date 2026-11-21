@@ -39,7 +39,7 @@ impl Tool {
 				let _ = write!(std::io::stdout(), "{}", command.usage);
 				ExitCode::SUCCESS
 			}
-			Err(Failure::Failed) => ExitCode::FAILURE,
+			Err(Failure::Failed(code)) => ExitCode::from(code),
 			Err(Failure::Usage(message)) => {
 				let mut stderr = std::io::stderr();
 				let _ = writeln!(stderr, "{} {}: {message}", self.name, command.name);

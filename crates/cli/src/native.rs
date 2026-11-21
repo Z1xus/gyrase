@@ -30,7 +30,7 @@ pub(crate) fn main(args: Vec<OsString>) -> ExitCode {
 			let _ = write!(std::io::stdout(), "{USAGE}");
 			ExitCode::SUCCESS
 		}
-		Err(Failure::Failed) => ExitCode::FAILURE,
+		Err(Failure::Failed(code)) => ExitCode::from(code),
 		Err(Failure::Usage(message)) => {
 			let _ = write!(std::io::stderr(), "gyr: {message}\n{USAGE}");
 			ExitCode::FAILURE

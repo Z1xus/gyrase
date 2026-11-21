@@ -3,7 +3,7 @@ use std::fmt::Display;
 #[derive(Debug)]
 pub(crate) enum Failure {
 	Help,
-	Failed,
+	Failed(u8),
 	Usage(String),
 	Error(String),
 }
