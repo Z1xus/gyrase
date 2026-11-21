@@ -9,6 +9,7 @@ export component RunningView inherits VerticalLayout {
     in property <[string]> tags;
     in property <StepKind> stage;
     in property <string> label;
+    in property <string> position;
     in property <float> progress;
     in property <string> eta;
     in property <bool> cancellable;
@@ -33,6 +34,15 @@ export component RunningView inherits VerticalLayout {
                 source: Icons.step(root.stage);
                 size: 64px;
             }
+        }
+
+        Text {
+            text: root.position;
+            font-size: 12px;
+            font-weight: 500;
+            color: Gel.ink-muted;
+            horizontal-alignment: center;
+            min-height: 16px;
         }
 
         Text {

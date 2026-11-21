@@ -1,6 +1,6 @@
 import { Gel } from "palette.slint";
 import { Icon, Icons } from "icons.slint";
-import { Card, ChipButton, ErrorLine, Pressable, PrimaryButton } from "controls.slint";
+import { Caption, Card, ChipButton, ErrorLine, Pressable, PrimaryButton } from "controls.slint";
 import { SampleCard } from "sample-card.slint";
 import { Chip, Step } from "types.slint";
 
@@ -96,25 +96,41 @@ export component ReadyView inherits VerticalLayout {
         }
     }
 
-    if root.chips.length > 0: GridLayout {
-        spacing: 8px;
+    if root.chips.length > 0: VerticalLayout {
+        spacing: 6px;
 
-        for chip[index] in root.chips: ChipButton {
-            row: floor(index / 3);
-            col: mod(index, 3);
-            width: (root.width - 16px) / 3;
-            text: chip.label;
-            on: chip.on;
-            clicked => {
-                root.toggle(index);
+        Caption {
+            text: "Raw data formats";
+        }
+
+        GridLayout {
+            spacing: 8px;
+
+            for chip[index] in root.chips: ChipButton {
+                row: floor(index / 3);
+                col: mod(index, 3);
+                width: (root.width - 16px) / 3;
+                text: chip.label;
+                on: chip.on;
+                clicked => {
+                    root.toggle(index);
+                }
             }
         }
     }
 
-    FolderRow {
-        path: root.folder;
-        choose => {
-            root.choose-folder();
+    VerticalLayout {
+        spacing: 6px;
+
+        Caption {
+            text: "Save to";
+        }
+
+        FolderRow {
+            path: root.folder;
+            choose => {
+                root.choose-folder();
+            }
         }
     }
 

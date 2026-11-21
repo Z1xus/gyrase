@@ -1,6 +1,6 @@
 import { Gel } from "palette.slint";
 import { Icons } from "icons.slint";
-import { ErrorLine, Pressable, PrimaryButton } from "controls.slint";
+import { ErrorLine, PrimaryButton } from "controls.slint";
 import { Tile } from "sample-card.slint";
 
 export component PickView inherits VerticalLayout {
@@ -32,7 +32,7 @@ export component PickView inherits VerticalLayout {
             }
 
             Text {
-                text: "Drop your files";
+                text: root.dragging ? "Release to add" : "Drop your files here";
                 font-size: 20px;
                 font-weight: 600;
                 color: Gel.ink;
@@ -40,18 +40,10 @@ export component PickView inherits VerticalLayout {
             }
 
             Text {
-                text: "FASTQ, BAM, CRAM or VCF";
+                text: "FASTQ, SAM, BAM, CRAM or VCF";
                 font-size: 13px;
                 color: Gel.ink-muted;
                 horizontal-alignment: center;
-            }
-        }
-
-        Pressable {
-            radius: 20px;
-            accessible-label: "Choose Files";
-            clicked => {
-                root.choose();
             }
         }
     }

@@ -1,6 +1,6 @@
 use gyrase_extract::CallBuild;
-use gyrase_jobs::{Kind, Lane, Progress, Source};
-use slint::{ModelRc, SharedString, VecModel};
+use gyrase_jobs::{Kind, Lane, Progress, Source, Stage};
+use slint::{Model, ModelRc, SharedString, VecModel};
 
 use crate::prepared::Prepared;
 use crate::screen::{Finished, Screen};
@@ -42,8 +42,24 @@ pub(crate) fn progress(app: &App, progress: Progress, fraction: f32) {
 	}
 	app.set_stage(labels::step_kind(progress.stage));
 	app.set_stage_label(labels::activity(progress.stage).into());
+	app.set_stage_position(position(app, progress.stage).into());
 	app.set_progress(fraction);
-	app.set_eta(progress.eta.map(labels::eta).unwrap_or_default().into());
+	let percent = format!("{:.0}%", fraction * 100.0);
+	let eta = match progress.eta {
+		Some(remaining) => format!("{percent} · {}", labels::eta(remaining)),
+		None => percent,
+	};
+	app.set_eta(eta.into());
+}
+
+fn position(app: &App, stage: Stage) -> String {
+	let steps = app.get_steps();
+	let kind = labels::step_kind(stage);
+	steps
+		.iter()
+		.position(|step| step.kind == kind)
+		.map(|index| format!("Step {} of {}", index + 1, steps.row_count()))
+		.unwrap_or_default()
 }
 
 fn status(app: &App, view: View, error: Option<&str>) {
@@ -55,6 +71,7 @@ fn starting(app: &App, prepared: &Prepared) {
 	if let Some(&stage) = prepared.plan.stages.first() {
 		app.set_stage(labels::step_kind(stage));
 		app.set_stage_label(labels::activity(stage).into());
+		app.set_stage_position(position(app, stage).into());
 	}
 	app.set_progress(0.0);
 	app.set_eta(SharedString::new());
