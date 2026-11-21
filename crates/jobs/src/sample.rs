@@ -196,8 +196,7 @@ fn is_index(token: &str) -> bool {
 fn stem(path: &Path) -> String {
 	let mut name = path
 		.file_name()
-		.map(|name| name.to_string_lossy().into_owned())
-		.unwrap_or_default();
+		.map_or_default(|name| name.to_string_lossy().into_owned());
 	while let Some(extension) = EXTENSIONS.iter().find(|extension| {
 		name.len() > extension.len() && name.to_ascii_lowercase().ends_with(*extension)
 	}) {

@@ -1644,7 +1644,6 @@ version = "0.1.0"
 dependencies = [
  "gyrase-io",
  "md-5",
- "memchr",
  "thiserror 2.0.21",
 ]
 

@@ -16,8 +16,7 @@ impl Remap {
 				let name = u32::try_from(index)
 					.ok()
 					.and_then(|id| from.contig(id))
-					.map(|contig| contig.name.as_str())
-					.unwrap_or_default();
+					.map_or_default(|contig| contig.name.as_str());
 				to.contig_id(name)
 					.ok_or_else(|| Error::UndefinedContig(name.to_owned()))
 			})

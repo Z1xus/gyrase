@@ -368,8 +368,7 @@ fn count_error(header: &Header, record: &Record, key: u32) -> Error {
 		tag: header.name(key).unwrap_or_default().to_owned(),
 		contig: header
 			.contig(record.contig)
-			.map(|contig| contig.name.clone())
-			.unwrap_or_default(),
+			.map_or_default(|contig| contig.name.clone()),
 		position: u64::from(record.start) + 1,
 	}
 }

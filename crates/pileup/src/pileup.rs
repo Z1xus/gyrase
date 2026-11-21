@@ -594,9 +594,8 @@ fn mismatches(
 				.zip(bases.get(query..query + len).unwrap_or_default())
 				.zip(qualities.get(query..query + len).unwrap_or_default())
 				.filter(|&((&expected, &base), &quality)| {
-					base != expected
-						&& base != b'N' && expected != b'N'
-						&& quality >= COUNTED_MISMATCH_QUALITY
+					let called = base != b'N' && expected != b'N';
+					called && base != expected && quality >= COUNTED_MISMATCH_QUALITY
 				})
 				.count();
 		}

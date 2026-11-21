@@ -201,8 +201,7 @@ impl Norm {
 		let name = self
 			.header
 			.contig(record.contig())
-			.map(|contig| contig.name.clone())
-			.unwrap_or_default();
+			.map_or_default(|contig| contig.name.clone());
 		(name, u64::from(record.start()) + 1)
 	}
 

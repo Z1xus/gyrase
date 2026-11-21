@@ -43,7 +43,7 @@ pub(crate) fn progress(app: &App, progress: Progress, fraction: f32) {
 	app.set_current(current(app, progress.stage));
 	app.set_progress(fraction);
 	app.set_percent(format!("{:.0}%", fraction * 100.0).into());
-	app.set_eta(progress.eta.map(labels::eta).unwrap_or_default().into());
+	app.set_eta(progress.eta.map_or_default(labels::eta).into());
 }
 
 fn current(app: &App, stage: Stage) -> i32 {

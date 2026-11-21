@@ -120,7 +120,7 @@ fn write_block(
 	put_length(out, data.len())?;
 	put_length(out, raw_len)?;
 	out.extend_from_slice(data);
-	let sum = out.get(started..).map(crc32).unwrap_or_default();
+	let sum = out.get(started..).map_or_default(crc32);
 	out.extend_from_slice(&sum.to_le_bytes());
 	Ok(())
 }

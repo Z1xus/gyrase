@@ -179,8 +179,7 @@ impl Line {
 		self.shown = Some(key);
 		let eta = progress
 			.eta
-			.map(|eta| format!("  {} left", duration(eta)))
-			.unwrap_or_default();
+			.map_or_default(|eta| format!("  {} left", duration(eta)));
 		let text = format!("{:<20} {percent:>3}%{eta}", stage(progress.stage));
 		let mut stderr = std::io::stderr();
 		let _ = if self.terminal {

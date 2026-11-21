@@ -629,10 +629,9 @@ impl<'a> Worker<'a> {
 				.iter()
 				.filter_map(|&accepted| list.get(accepted))
 				.all(|other| overlap_with(other) * 2 < candidate_length);
-			let kind = if candidate.score >= self.config.min_score
-				&& disjoint && candidate_length - primary_overlap >= MIN_NEW_BASES
-				&& supplementary < self.config.max_supplementary
-			{
+			let novel = disjoint && candidate_length - primary_overlap >= MIN_NEW_BASES;
+			let room = supplementary < self.config.max_supplementary;
+			let kind = if candidate.score >= self.config.min_score && novel && room {
 				supplementary += 1;
 				Some(Flag::Supplementary)
 			} else if !disjoint && secondary < self.config.max_secondary {

@@ -10,7 +10,6 @@ repository.workspace = true
 [dependencies]
 gyrase-io.workspace = true
 md-5.workspace = true
-memchr.workspace = true
 thiserror.workspace = true
 
 [lints]

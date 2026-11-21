@@ -359,8 +359,7 @@ fn sites(window: Window<'_>, targets: &[Target]) -> Vec<Site> {
 				.to_vec(),
 			alternates: target
 				.alternate
-				.map(|base| vec![vec![base.ascii()]])
-				.unwrap_or_default(),
+				.map_or_default(|base| vec![vec![base.ascii()]]),
 		})
 		.collect()
 }
