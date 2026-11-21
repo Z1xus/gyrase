@@ -1607,6 +1607,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gyrase"
+version = "0.1.0"
+dependencies = [
+ "gyrase-extract",
+ "gyrase-jobs",
+ "opener",
+ "rfd",
+ "slint",
+ "slint-build",
+ "winresource",
+]
+
+[[package]]
 name = "gyrase-call"
 version = "0.1.0"
 dependencies = [
@@ -1645,19 +1658,6 @@ dependencies = [
  "gyrase-io",
  "md-5",
  "thiserror 2.0.21",
-]
-
-[[package]]
-name = "gyrase-gui"
-version = "0.1.0"
-dependencies = [
- "gyrase-extract",
- "gyrase-jobs",
- "opener",
- "rfd",
- "slint",
- "slint-build",
- "winresource",
 ]
 
 [[package]]

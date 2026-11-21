@@ -1,11 +1,15 @@
 [package]
-name = "gyrase-gui"
+name = "gyrase"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Desktop app to turn whole-genome DNA files into VCF and raw genotype files"
+readme = "README.md"
+keywords = ["genomics", "bioinformatics", "dna", "vcf", "gui"]
+categories = ["gui", "science::bioinformatics::genomics"]
 build = "build.rs"
 
 [[bin]]

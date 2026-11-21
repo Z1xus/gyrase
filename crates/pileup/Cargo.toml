@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Region-sharded read pileup columns and indel observations for variant calling"
+readme = "README.md"
+keywords = ["genomics", "bioinformatics", "pileup", "variant-calling"]
+categories = ["science::bioinformatics::genomics", "algorithms"]
 
 [dependencies]
 gyrase-genome.workspace = true

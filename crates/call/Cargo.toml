@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "SNP and indel variant caller over genomic read pileups"
+readme = "README.md"
+keywords = ["genomics", "bioinformatics", "variant-calling", "snp", "indel"]
+categories = ["science::bioinformatics::genomics", "algorithms"]
 
 [dependencies]
 gyrase-genome.workspace = true

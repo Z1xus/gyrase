@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Whole-genome alignment, variant calling and export pipeline runner for gyrase"
+readme = "README.md"
+keywords = ["genomics", "bioinformatics", "pipeline", "vcf", "bam"]
+categories = ["science::bioinformatics::genomics"]
 
 [dependencies]
 gyrase-call.workspace = true

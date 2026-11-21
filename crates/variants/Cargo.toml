@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "VCF and BCF readers, writers, normalization, merging, querying and filtering"
+readme = "README.md"
+keywords = ["genomics", "bioinformatics", "vcf", "bcf", "variants"]
+categories = ["science::bioinformatics::genomics", "parsing"]
 
 [dependencies]
 gyrase-genome.workspace = true

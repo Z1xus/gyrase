@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license = "MIT OR Apache-2.0"
 repository.workspace = true
+description = "Fast safe-Rust short-read DNA aligner using syncmer randstrobes"
+readme = "README.md"
+keywords = ["bioinformatics", "genomics", "aligner", "dna", "short-reads"]
+categories = ["science::bioinformatics::sequence-analysis", "science::bioinformatics::genomics", "algorithms"]
 
 [dependencies]
 gyrase-genome.workspace = true

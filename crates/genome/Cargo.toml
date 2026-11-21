@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license = "MIT OR Apache-2.0"
 repository.workspace = true
+description = "Core genomics types, contig aliases and indexed FASTA reference access"
+readme = "README.md"
+keywords = ["genomics", "bioinformatics", "fasta", "reference", "contigs"]
+categories = ["science::bioinformatics::genomics", "science::bioinformatics::sequence-analysis"]
 
 [dependencies]
 gyrase-io.workspace = true
