@@ -31,17 +31,34 @@ const PADDING: u64 = 256;
 const BCF_MAGIC: &[u8] = b"BCF";
 const TABIX_VCF_PRESET: u32 = 2;
 const BCF_PREAMBLE: usize = 5;
+const MAX_PART_LENGTH: u32 = 1 << 28;
 
 fn invalid(what: &str) -> Failure {
 	Failure::new(format!("could not parse {what}"))
 }
 
+fn part_length(bytes: [u8; 4]) -> Result<u32, Failure> {
+	let length = u32::from_le_bytes(bytes);
+	if length > MAX_PART_LENGTH {
+		return Err(invalid("an oversized length"));
+	}
+	Ok(length)
+}
+
+fn read_exact_vec(reader: &mut BgzfReader, length: u32, out: &mut Vec<u8>) -> Result<(), Failure> {
+	let wanted = u64::from(length);
+	if Read::by_ref(reader).take(wanted).read_to_end(out)? as u64 != wanted {
+		return Err(invalid("a truncated BCF"));
+	}
+	Ok(())
+}
+
 fn walk_bcf(reader: &mut BgzfReader, min_shift: u32) -> Result<Index, Failure> {
 	let mut preamble = [0u8; BCF_PREAMBLE + 4];
 	reader.read_exact(&mut preamble)?;
-	let text_length = u32::from_le_bytes([preamble[5], preamble[6], preamble[7], preamble[8]]);
-	let mut text = vec![0; usize::try_from(text_length).map_err(|_| invalid("the header"))?];
-	reader.read_exact(&mut text)?;
+	let text_length = part_length([preamble[5], preamble[6], preamble[7], preamble[8]])?;
+	let mut text = Vec::new();
+	read_exact_vec(reader, text_length, &mut text)?;
 	while text.last() == Some(&0) {
 		text.pop();
 	}
@@ -60,14 +77,10 @@ fn walk_bcf(reader: &mut BgzfReader, min_shift: u32) -> Result<Index, Failure> {
 			Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
 			Err(error) => return Err(error.into()),
 		}
-		let shared = u32::from_le_bytes([sizes[0], sizes[1], sizes[2], sizes[3]]);
-		let individual = u32::from_le_bytes([sizes[4], sizes[5], sizes[6], sizes[7]]);
-		record.resize(
-			usize::try_from(u64::from(shared) + u64::from(individual))
-				.map_err(|_| invalid("a record"))?,
-			0,
-		);
-		reader.read_exact(&mut record)?;
+		let shared = part_length([sizes[0], sizes[1], sizes[2], sizes[3]])?;
+		let individual = part_length([sizes[4], sizes[5], sizes[6], sizes[7]])?;
+		record.clear();
+		read_exact_vec(reader, shared + individual, &mut record)?;
 		let end = reader.virtual_offset();
 		let word = |at: usize| {
 			record

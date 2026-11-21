@@ -13,7 +13,7 @@ pub(crate) enum LineKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FieldDef {
+pub struct FieldDefinition {
 	pub number: Number,
 	pub value_type: ValueType,
 }
@@ -29,7 +29,7 @@ pub(crate) struct Line {
 pub(crate) struct Parsed {
 	pub line: Line,
 	pub explicit_index: Option<u32>,
-	pub definition: Option<FieldDef>,
+	pub definition: Option<FieldDefinition>,
 	pub contig_length: Option<u64>,
 }
 
@@ -85,7 +85,7 @@ pub(crate) fn parse_line(text: &str) -> Result<Parsed, Error> {
 	let explicit_index = find("IDX").and_then(|value| value.parse().ok());
 	let contig_length = find("length").and_then(|value| value.parse().ok());
 	let definition = match kind {
-		LineKind::Info | LineKind::Format => Some(FieldDef {
+		LineKind::Info | LineKind::Format => Some(FieldDefinition {
 			number: find("Number")
 				.and_then(Number::parse)
 				.ok_or(Error::Header("field without a valid Number"))?,

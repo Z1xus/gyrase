@@ -6,7 +6,7 @@ use gyrase_genome::{Contig, Contigs};
 
 use crate::Error;
 use crate::value::{Number, ValueType};
-pub use line::FieldDef;
+pub use line::FieldDefinition;
 use line::{Line, LineKind, Parsed, parse_line};
 
 const PASS_LINE: &str = "##FILTER=<ID=PASS,Description=\"All filters passed\">";
@@ -22,8 +22,8 @@ pub struct Version {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringEntry {
 	pub name: String,
-	pub info: Option<FieldDef>,
-	pub format: Option<FieldDef>,
+	pub info: Option<FieldDefinition>,
+	pub format: Option<FieldDefinition>,
 	pub filter: bool,
 }
 
@@ -86,14 +86,22 @@ impl Header {
 			.iter()
 			.map(|text| parse_line(text.trim_end()))
 			.collect::<Result<Vec<_>, _>>()?;
-		let indexed = parsed.iter().any(|line| line.explicit_index.is_some());
 		let has_pass = parsed.iter().any(|line| {
 			line.line.kind == LineKind::Filter && line.line.id.as_deref() == Some("PASS")
 		});
-		if !indexed {
-			parsed.insert(1, parse_line(PASS_LINE)?);
-		} else if !has_pass {
-			parsed.push(parse_line(PASS_LINE)?);
+		let first_slot_claimed = parsed.iter().any(|line| {
+			matches!(
+				line.line.kind,
+				LineKind::Info | LineKind::Format | LineKind::Filter
+			) && line.explicit_index == Some(0)
+		});
+		if !has_pass {
+			let pass = parse_line(PASS_LINE)?;
+			if first_slot_claimed {
+				parsed.push(pass);
+			} else {
+				parsed.insert(1, pass);
+			}
 		}
 		for line in parsed {
 			header.add_line(line, &mut seen)?;
@@ -222,11 +230,11 @@ impl Header {
 		self.entry(key).map(|entry| entry.name.as_str())
 	}
 
-	pub fn info_def(&self, key: u32) -> Option<&FieldDef> {
+	pub fn info_def(&self, key: u32) -> Option<&FieldDefinition> {
 		self.entry(key)?.info.as_ref()
 	}
 
-	pub fn format_def(&self, key: u32) -> Option<&FieldDef> {
+	pub fn format_def(&self, key: u32) -> Option<&FieldDefinition> {
 		self.entry(key)?.format.as_ref()
 	}
 
@@ -385,7 +393,7 @@ impl Header {
 
 const MAX_DICTIONARY: usize = 1 << 22;
 
-fn conflicts(first: Option<&FieldDef>, second: Option<&FieldDef>) -> bool {
+fn conflicts(first: Option<&FieldDefinition>, second: Option<&FieldDefinition>) -> bool {
 	first
 		.zip(second)
 		.is_some_and(|(first, second)| first != second)

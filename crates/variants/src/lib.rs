@@ -23,7 +23,7 @@ pub use bcf::{BcfRecord, Encoder, FormatEntry, InfoEntry, Typed};
 pub use concat::{Concat, ConcatInput, ConcatOptions, ConcatOutput};
 pub use error::Error;
 pub use filter::{Filter, Scratch as FilterScratch};
-pub use header::{ContigEntry, FieldDef, Header, StringEntry, Version};
+pub use header::{ContigEntry, FieldDefinition, Header, StringEntry, Version};
 pub use index::{IndexCollector, IndexKind};
 pub use merge::{Collapse, Merge, MergeOptions};
 pub use norm::{Duplicates, Mismatch, Norm, NormOptions, NormOutput, NormStats, Splitting};

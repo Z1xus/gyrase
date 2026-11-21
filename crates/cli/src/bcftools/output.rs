@@ -119,7 +119,7 @@ pub(super) fn index_format(text: Option<&str>) -> Result<IndexFormat, Failure> {
 	}
 }
 
-pub(super) enum Dest {
+pub(super) enum OutputSink {
 	Plain(PlainSink<Output>),
 	Bgzf(BgzfWriter<Output>),
 }
@@ -129,7 +129,7 @@ pub(super) enum Done {
 	Bgzf(Finished<Output>),
 }
 
-impl Write for Dest {
+impl Write for OutputSink {
 	fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
 		match self {
 			Self::Plain(sink) => sink.write(bytes),
@@ -145,7 +145,7 @@ impl Write for Dest {
 	}
 }
 
-impl Sink for Dest {
+impl Sink for OutputSink {
 	type Mark = Option<BlockPosition>;
 	type Done = Done;
 
@@ -213,27 +213,31 @@ impl Destination {
 		format: Format,
 		workers: &Workers,
 		target: &Target,
-	) -> Result<Writer<Dest>, Failure> {
+	) -> Result<Writer<OutputSink>, Failure> {
 		Ok(Writer::new(self.sink(workers, target)?, header, format)?)
 	}
 
-	pub(super) fn bare(&self, workers: &Workers, target: &Target) -> Result<Writer<Dest>, Failure> {
+	pub(super) fn bare(
+		&self,
+		workers: &Workers,
+		target: &Target,
+	) -> Result<Writer<OutputSink>, Failure> {
 		Ok(Writer::without_header(self.sink(workers, target)?))
 	}
 
-	fn sink(&self, workers: &Workers, target: &Target) -> Result<Dest, Failure> {
+	fn sink(&self, workers: &Workers, target: &Target) -> Result<OutputSink, Failure> {
 		let out = target.open()?;
 		Ok(match self.kind {
-			Kind::Vcf => Dest::Plain(PlainSink::new(out)),
+			Kind::Vcf => OutputSink::Plain(PlainSink::new(out)),
 			Kind::VcfGz(level) | Kind::Bcf(level) => {
-				Dest::Bgzf(BgzfWriter::new(out, level, workers))
+				OutputSink::Bgzf(BgzfWriter::new(out, level, workers))
 			}
 		})
 	}
 
 	pub(super) fn finish(
 		&self,
-		writer: Writer<Dest>,
+		writer: Writer<OutputSink>,
 		collector: &Collector,
 		header: &Header,
 		workers: &Workers,

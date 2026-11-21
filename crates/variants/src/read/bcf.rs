@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Read};
+use std::io::{BufRead, Read};
 
 use crate::Error;
 use crate::bcf::BcfRecord;
@@ -45,10 +45,13 @@ impl RecordBatch {
 			.iter()
 			.map(move |&(shared_len, sample_block_len)| {
 				let shared_end = start + shared_len;
-				let indiv_end = shared_end + sample_block_len;
+				let sample_block_end = shared_end + sample_block_len;
 				let shared = self.bytes.get(start..shared_end).unwrap_or_default();
-				let sample_block = self.bytes.get(shared_end..indiv_end).unwrap_or_default();
-				start = indiv_end;
+				let sample_block = self
+					.bytes
+					.get(shared_end..sample_block_end)
+					.unwrap_or_default();
+				start = sample_block_end;
 				BcfRecord::new(shared, sample_block)
 			})
 	}
@@ -120,17 +123,12 @@ pub(crate) fn read_record(
 	let shared_len = shared_len as usize;
 	let sample_block_len = sample_block_len as usize;
 	let start = out.len();
-	out.resize(start + shared_len + sample_block_len, 0);
-	let body = out
-		.get_mut(start..)
-		.ok_or(Error::Bcf("record is truncated"))?;
-	source.read_exact(body).map_err(|error| {
-		if error.kind() == io::ErrorKind::UnexpectedEof {
-			Error::Bcf("record is truncated")
-		} else {
-			Error::Io(error)
-		}
-	})?;
+	let wanted = shared_len + sample_block_len;
+	let read = Read::by_ref(source).take(wanted as u64).read_to_end(out)?;
+	if read != wanted {
+		out.truncate(start);
+		return Err(Error::Bcf("record is truncated"));
+	}
 	Ok(Some((shared_len, sample_block_len)))
 }
 
