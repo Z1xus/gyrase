@@ -129,8 +129,16 @@ impl Scratch {
 		interval: Interval,
 		window: Window<'a>,
 		filter: Filter,
-		records: impl Iterator<Item = Result<RecordRef<'r>, E>> + Clone,
+		records: impl Iterator<Item = Result<RecordRef<'r>, E>>,
 	) -> Result<Pileup<'a>, E> {
+		let mut records = records.collect::<Result<Vec<_>, E>>()?;
+		records.sort_by_cached_key(|record| {
+			(
+				record.position(),
+				fragment_id(record.name()),
+				record.flags().bits(),
+			)
+		});
 		let span = usize::try_from(interval.len()).unwrap_or(0);
 		self.indels.clear();
 		self.inserted.clear();
@@ -145,8 +153,8 @@ impl Scratch {
 		};
 		self.coverage.clear();
 		self.coverage.resize(span + 1, 0);
-		for record in records.clone() {
-			self.count(&record?, &shard);
+		for record in &records {
+			self.count(record, &shard);
 		}
 		self.offsets.clear();
 		self.offsets.push(0);
@@ -163,8 +171,8 @@ impl Scratch {
 		}
 		self.observations.clear();
 		self.observations.resize(total, placeholder());
-		for record in records {
-			self.place(&record?, &shard);
+		for record in &records {
+			self.place(record, &shard);
 		}
 		self.merge_mates(span);
 		self.indels.sort_by_key(|indel| indel.anchor);

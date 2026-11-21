@@ -18,7 +18,7 @@ const SHARD_LEN: u64 = 1 << 18;
 const MIN_SHARD_LEN: u64 = 1 << 14;
 const SPLIT_FACTOR: u64 = 2;
 const PAD: u64 = 2_000;
-const SURVEY_STRIDE: usize = 16;
+const SURVEY_STRIDE: u64 = 16;
 const COVERAGE_MAPPING_QUALITY: u8 = 20;
 
 #[derive(Debug, Clone)]
@@ -163,7 +163,7 @@ impl Calling<'_> {
 		let parts: Vec<Result<(Calibration, Coverage), Error>> = self.workers.install(|| {
 			shards
 				.par_iter()
-				.step_by(SURVEY_STRIDE)
+				.filter(|shard| (shard.interval.start / SHARD_LEN).is_multiple_of(SURVEY_STRIDE))
 				.map_init(Scratch::new, |scratch, shard| {
 					self.cancel.check()?;
 					self.with_pileup(shard, scratch, |pileup| {

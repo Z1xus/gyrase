@@ -146,9 +146,7 @@ impl Alignments {
 }
 
 impl Batches {
-	pub(crate) fn records(
-		&self,
-	) -> impl Iterator<Item = Result<RecordRef<'_>, RecordError>> + Clone {
+	pub(crate) fn records(&self) -> impl Iterator<Item = Result<RecordRef<'_>, RecordError>> {
 		let bam = self.bam.iter().flat_map(|batch| {
 			batch
 				.iter()
