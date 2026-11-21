@@ -11,13 +11,18 @@ readme = "README.md"
 keywords = ["bioinformatics", "genomics", "aligner", "dna", "short-reads"]
 categories = ["science::bioinformatics::sequence-analysis", "science::bioinformatics::genomics", "algorithms"]
 
+[features]
+gpu = ["dep:pollster", "dep:wgpu"]
+
 [dependencies]
 gyrase-genome.workspace = true
 gyrase-io.workspace = true
 gyrase-reads.workspace = true
 multiversion.workspace = true
+pollster = { workspace = true, optional = true }
 rayon.workspace = true
 thiserror.workspace = true
+wgpu = { workspace = true, optional = true }
 
 [lints]
 workspace = true

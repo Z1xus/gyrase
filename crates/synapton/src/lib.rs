@@ -8,6 +8,9 @@ mod describe;
 mod error;
 mod extend;
 mod fast;
+mod front;
+#[cfg(feature = "gpu")]
+mod gpu;
 mod hash;
 mod index;
 mod kernel;

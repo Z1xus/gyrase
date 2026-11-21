@@ -108,6 +108,11 @@ impl Index {
 		}
 	}
 
+	#[cfg(feature = "gpu")]
+	pub(crate) fn tables(&self) -> (u32, &[u32], &[u64]) {
+		(self.bucket_bits, &self.buckets, &self.entries)
+	}
+
 	pub(crate) fn certified(&self, start: u64, length: usize) -> bool {
 		let first = start / WORD_BASES;
 		let last = (start + length as u64 - 1) / WORD_BASES;

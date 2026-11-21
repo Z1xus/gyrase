@@ -31,11 +31,13 @@ lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", 
 md-5 = "0.11.0"
 memchr = "2.8.3"
 multiversion = "0.9.2"
+pollster = "0.4.0"
 rayon = "1.12.0"
 slint = { version = "1.18.1", default-features = false, features = ["accessibility", "backend-winit", "compat-1-2", "renderer-software", "std", "unstable-winit-030"] }
 sysinfo = { version = "0.40.4", default-features = false, features = ["system"] }
 thiserror = "2.0.21"
 ureq = { version = "3.5.2", default-features = false, features = ["rustls"] }
+wgpu = { version = "30.0.2", default-features = false, features = ["dx12", "metal", "parking_lot", "std", "vulkan", "wgsl"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

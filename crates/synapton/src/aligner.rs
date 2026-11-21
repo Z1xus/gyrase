@@ -1,13 +1,29 @@
+#[cfg(feature = "gpu")]
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "gpu")]
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+
 use gyrase_io::Workers;
 use rayon::prelude::*;
 
 use crate::Error;
 use crate::alignment::AlignedBatch;
 use crate::config::AlignConfig;
+#[cfg(feature = "gpu")]
+use crate::front::FrontBatch;
+#[cfg(feature = "gpu")]
+use crate::gpu::Gpu;
 use crate::index::Index;
 use crate::num::u32_of;
 use crate::pairing::InsertModel;
+#[cfg(feature = "gpu")]
+use crate::worker::Front;
 use crate::worker::{Layout, Worker};
+
+#[cfg(feature = "gpu")]
+const FIRST_PIECE_CHUNKS: usize = 8;
+#[cfg(feature = "gpu")]
+const MAX_PIECE_CHUNKS: usize = 32;
 
 pub const MAX_READ_LENGTH: usize = 1024;
 
@@ -63,6 +79,8 @@ pub struct Aligner<'a> {
 	index: &'a Index,
 	config: AlignConfig,
 	workers: &'a Workers,
+	#[cfg(feature = "gpu")]
+	gpu: Option<Gpu>,
 }
 
 impl<'a> Aligner<'a> {
@@ -71,7 +89,25 @@ impl<'a> Aligner<'a> {
 			index,
 			config,
 			workers,
+			#[cfg(feature = "gpu")]
+			gpu: config
+				.gpu
+				.then(|| {
+					Gpu::new(
+						index,
+						&config,
+						2 * MAX_PIECE_CHUNKS * config.chunk_reads.max(1),
+					)
+				})
+				.flatten(),
 		}
+	}
+
+	pub fn uses_gpu(&self) -> bool {
+		#[cfg(feature = "gpu")]
+		return self.gpu.is_some();
+		#[cfg(not(feature = "gpu"))]
+		false
 	}
 
 	pub fn align_reads(&self, reads: &[Read<'_>]) -> Result<AlignedBatch, Error> {
@@ -160,6 +196,10 @@ impl<'a> Aligner<'a> {
 		each: impl Fn(&mut S, AlignedBatch) -> T + Sync,
 	) -> Vec<T> {
 		let chunk = ends * self.config.chunk_reads.max(1);
+		#[cfg(feature = "gpu")]
+		if let Some(gpu) = &self.gpu {
+			return self.run_gpu(gpu, sequences, ends, layout, init, each);
+		}
 		self.workers.install(|| {
 			sequences
 				.par_chunks(chunk)
@@ -169,12 +209,125 @@ impl<'a> Aligner<'a> {
 					|(worker, state), (number, part)| {
 						let mut out = AlignedBatch::default();
 						let first_read = u32_of(number * self.config.chunk_reads.max(1));
-						worker.align(part, layout, first_read, &mut out);
+						worker.align(part, layout, first_read, None, &mut out);
 						each(state, out)
 					},
 				)
 				.collect()
 		})
+	}
+
+	#[cfg(feature = "gpu")]
+	fn run_gpu<S, T: Send>(
+		&self,
+		gpu: &Gpu,
+		sequences: &[&[u8]],
+		ends: usize,
+		layout: Layout<'_>,
+		init: impl Fn() -> S + Sync,
+		each: impl Fn(&mut S, AlignedBatch) -> T + Sync,
+	) -> Vec<T> {
+		let chunk = ends * self.config.chunk_reads.max(1);
+		let parts: Vec<&[&[u8]]> = sequences.chunks(chunk).collect();
+		let mut bounds = vec![0];
+		let mut size = FIRST_PIECE_CHUNKS;
+		while let Some(&last) = bounds.last().filter(|&&last| last < parts.len()) {
+			bounds.push((last + size).min(parts.len()));
+			size = (2 * size).min(MAX_PIECE_CHUNKS);
+		}
+		let pieces = Pieces::new(bounds.len() - 1);
+		let results: Vec<Mutex<Option<T>>> = parts.iter().map(|_| Mutex::new(None)).collect();
+		let next = AtomicUsize::new(0);
+		std::thread::scope(|scope| {
+			scope.spawn(|| {
+				for (number, edge) in bounds.windows(2).enumerate() {
+					let piece = sequences
+						.get(edge[0] * chunk..(edge[1] * chunk).min(sequences.len()))
+						.unwrap_or_default();
+					pieces.publish(number, gpu.front(piece).map(Arc::new));
+				}
+			});
+			self.workers.install(|| {
+				rayon::scope(|workers| {
+					for _ in 0..rayon::current_num_threads() {
+						workers.spawn(|_| {
+							let mut worker = Worker::new(self.index, self.config);
+							let mut state = init();
+							loop {
+								let number = next.fetch_add(1, Ordering::Relaxed);
+								let (Some(part), Some(slot)) =
+									(parts.get(number), results.get(number))
+								else {
+									break;
+								};
+								let piece = bounds.partition_point(|&edge| edge <= number) - 1;
+								let front = pieces.wait(piece);
+								let mut out = AlignedBatch::default();
+								worker.align(
+									part,
+									layout,
+									u32_of(number * self.config.chunk_reads.max(1)),
+									front.as_deref().map(|batch| Front {
+										batch,
+										first: (number - bounds[piece]) * chunk,
+									}),
+									&mut out,
+								);
+								*slot.lock().unwrap_or_else(PoisonError::into_inner) =
+									Some(each(&mut state, out));
+							}
+						});
+					}
+				});
+			});
+		});
+		results
+			.into_iter()
+			.filter_map(|slot| slot.into_inner().unwrap_or_else(PoisonError::into_inner))
+			.collect()
+	}
+}
+
+#[cfg(feature = "gpu")]
+enum Piece {
+	Pending,
+	Ready(Option<Arc<FrontBatch>>),
+}
+
+#[cfg(feature = "gpu")]
+struct Pieces {
+	ready: Mutex<Vec<Piece>>,
+	signal: Condvar,
+}
+
+#[cfg(feature = "gpu")]
+impl Pieces {
+	fn new(count: usize) -> Self {
+		Self {
+			ready: Mutex::new((0..count).map(|_| Piece::Pending).collect()),
+			signal: Condvar::new(),
+		}
+	}
+
+	fn publish(&self, piece: usize, batch: Option<Arc<FrontBatch>>) {
+		let mut ready = self.ready.lock().unwrap_or_else(PoisonError::into_inner);
+		if let Some(slot) = ready.get_mut(piece) {
+			*slot = Piece::Ready(batch);
+		}
+		self.signal.notify_all();
+	}
+
+	fn wait(&self, piece: usize) -> Option<Arc<FrontBatch>> {
+		let mut ready = self.ready.lock().unwrap_or_else(PoisonError::into_inner);
+		loop {
+			if let Some(Piece::Ready(batch)) = ready.get(piece) {
+				return batch.clone();
+			}
+			ready = self
+				.signal
+				.wait(ready)
+				.unwrap_or_else(PoisonError::into_inner);
+		}
 	}
 }
 

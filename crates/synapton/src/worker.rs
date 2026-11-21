@@ -12,6 +12,7 @@ use crate::config::AlignConfig;
 use crate::describe::{self, describe};
 use crate::extend::{ExtensionBatch, ExtensionResults, Outcome};
 use crate::fast;
+use crate::front::FrontBatch;
 use crate::index::Index;
 use crate::kernel::{self, CpuScratch};
 use crate::mapper::{Diagonal, Mapper};
@@ -35,6 +36,12 @@ const MAX_MATE_BOOST: u8 = 40;
 const MIN_PAIRED_SCORE: i32 = 19;
 const MIN_FAST_LENGTH: usize = 64;
 const FAST_DIAGONALS: usize = 2;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Front<'f> {
+	pub(crate) batch: &'f FrontBatch,
+	pub(crate) first: usize,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Layout<'m> {
@@ -151,13 +158,14 @@ impl<'a> Worker<'a> {
 		sequences: &[&[u8]],
 		layout: Layout<'_>,
 		first_read: u32,
+		front: Option<Front<'_>>,
 		out: &mut AlignedBatch,
 	) {
 		let model = match layout {
 			Layout::Paired(model) => Some(model),
 			Layout::Single => None,
 		};
-		self.seed_and_extend(sequences, model);
+		self.seed_and_extend(sequences, model, front);
 		if let Some(model) = model {
 			self.rescue(model);
 		}
@@ -165,7 +173,7 @@ impl<'a> Worker<'a> {
 	}
 
 	pub(crate) fn distances(&mut self, sequences: &[&[u8]], out: &mut Vec<i64>) {
-		self.seed_and_extend(sequences, None);
+		self.seed_and_extend(sequences, None, None);
 		for pair in 0..sequences.len() / 2 {
 			let (Some(first), Some(second)) = (self.list(2 * pair), self.list(2 * pair + 1)) else {
 				continue;
@@ -190,7 +198,12 @@ impl<'a> Worker<'a> {
 		}
 	}
 
-	fn seed_and_extend(&mut self, sequences: &[&[u8]], fast: Option<&InsertModel>) {
+	fn seed_and_extend(
+		&mut self,
+		sequences: &[&[u8]],
+		fast: Option<&InsertModel>,
+		front: Option<Front<'_>>,
+	) {
 		self.load(sequences);
 		self.candidates.clear();
 		self.operations.clear();
@@ -202,7 +215,7 @@ impl<'a> Worker<'a> {
 		for first in (0..self.queries.len()).step_by(2) {
 			let last = (first + 2).min(self.queries.len());
 			for end in first..last {
-				self.extract(end);
+				self.extract(end, front);
 			}
 			if let Some(model) = fast {
 				self.fast_pair(first / 2, model);
@@ -245,10 +258,14 @@ impl<'a> Worker<'a> {
 		self.candidates.get(self.ranges.get(end)?.clone())
 	}
 
-	fn extract(&mut self, end: usize) {
+	fn extract(&mut self, end: usize, front: Option<Front<'_>>) {
 		let Some(&query) = self.queries.get(end) else {
 			return;
 		};
+		if let Some(read) = front.and_then(|front| front.batch.read(front.first + end)) {
+			self.mapper.attach(end % 2, &read);
+			return;
+		}
 		let forward = self
 			.codes
 			.get(query.start..query.start + query.length)
@@ -271,7 +288,7 @@ impl<'a> Worker<'a> {
 		let reverse = codes
 			.get(start + query.length..start + 2 * query.length)
 			.unwrap_or_default();
-		let mapped = self.mapper.chains(end % 2, &mut self.chains);
+		let mapped = self.mapper.chains(end % 2, forward, &mut self.chains);
 		self.repeats.push(mapped.repeat_fraction);
 		let best = self.chains.first().map_or(0.0, |chain| chain.score);
 		let chains = std::mem::take(&mut self.chains);

@@ -97,6 +97,7 @@ pub struct AlignConfig {
 	pub calibration_pairs: usize,
 	pub chunk_reads: usize,
 	pub md: bool,
+	pub gpu: bool,
 }
 
 impl Default for AlignConfig {
@@ -111,6 +112,7 @@ impl Default for AlignConfig {
 			calibration_pairs: 8192,
 			chunk_reads: 512,
 			md: false,
+			gpu: true,
 		}
 	}
 }
