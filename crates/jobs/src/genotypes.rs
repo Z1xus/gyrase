@@ -293,12 +293,12 @@ impl Keys {
 		let key = |name: &str| header.key(name);
 		let depth = key("DP");
 		Self {
-			genotype: key("GT").filter(|&key| header.format_def(key).is_some()),
-			format_depth: depth.filter(|&key| header.format_def(key).is_some()),
-			info_depth: depth.filter(|&key| header.info_def(key).is_some()),
-			minimum_depth: key("MIN_DP").filter(|&key| header.format_def(key).is_some()),
-			allele_depths: key("AD").filter(|&key| header.format_def(key).is_some()),
-			quality: key("GQ").filter(|&key| header.format_def(key).is_some()),
+			genotype: key("GT").filter(|&key| header.format_definition(key).is_some()),
+			format_depth: depth.filter(|&key| header.format_definition(key).is_some()),
+			info_depth: depth.filter(|&key| header.info_definition(key).is_some()),
+			minimum_depth: key("MIN_DP").filter(|&key| header.format_definition(key).is_some()),
+			allele_depths: key("AD").filter(|&key| header.format_definition(key).is_some()),
+			quality: key("GQ").filter(|&key| header.format_definition(key).is_some()),
 		}
 	}
 }

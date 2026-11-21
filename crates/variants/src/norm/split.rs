@@ -204,7 +204,7 @@ impl Splitter {
 		target: &mut Record,
 	) -> Result<(), Error> {
 		let number = header
-			.info_def(field.key)
+			.info_definition(field.key)
 			.map_or(Number::Variable, |definition| definition.number);
 		let alleles = source.allele_count();
 		let counted = match &field.cells {
@@ -260,7 +260,7 @@ impl Splitter {
 		target: &mut Record,
 	) -> Result<(), Error> {
 		let number = header
-			.format_def(field.key)
+			.format_definition(field.key)
 			.map_or(Number::Variable, |definition| definition.number);
 		let samples = header.sample_count();
 		let alleles = source.allele_count();

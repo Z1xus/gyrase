@@ -405,7 +405,7 @@ impl Combiner {
 				}
 				let number = merge
 					.header
-					.info_def(field.key)
+					.info_definition(field.key)
 					.map_or(Number::Variable, |definition| definition.number);
 				let size = spread_size(number, alleles);
 				if let Some(index) = merge.rules.iter().position(|rule| rule.key == field.key) {
@@ -681,7 +681,7 @@ impl Combiner {
 	) -> Result<(), Error> {
 		let number = merge
 			.header
-			.format_def(key)
+			.format_definition(key)
 			.map_or(Number::Variable, |definition| definition.number);
 		let mut widest = 0;
 		let mut cells = None;

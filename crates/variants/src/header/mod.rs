@@ -230,11 +230,11 @@ impl Header {
 		self.entry(key).map(|entry| entry.name.as_str())
 	}
 
-	pub fn info_def(&self, key: u32) -> Option<&FieldDefinition> {
+	pub fn info_definition(&self, key: u32) -> Option<&FieldDefinition> {
 		self.entry(key)?.info.as_ref()
 	}
 
-	pub fn format_def(&self, key: u32) -> Option<&FieldDefinition> {
+	pub fn format_definition(&self, key: u32) -> Option<&FieldDefinition> {
 		self.entry(key)?.format.as_ref()
 	}
 
@@ -366,8 +366,8 @@ impl Header {
 	}
 
 	pub fn number_of(&self, key: u32) -> Option<Number> {
-		self.info_def(key)
-			.or_else(|| self.format_def(key))
+		self.info_definition(key)
+			.or_else(|| self.format_definition(key))
 			.map(|definition| definition.number)
 	}
 
@@ -376,11 +376,13 @@ impl Header {
 	}
 
 	pub fn type_of_info(&self, key: u32) -> Option<ValueType> {
-		self.info_def(key).map(|definition| definition.value_type)
+		self.info_definition(key)
+			.map(|definition| definition.value_type)
 	}
 
 	pub fn type_of_format(&self, key: u32) -> Option<ValueType> {
-		self.format_def(key).map(|definition| definition.value_type)
+		self.format_definition(key)
+			.map(|definition| definition.value_type)
 	}
 
 	pub fn keys(&self) -> impl Iterator<Item = (u32, &StringEntry)> {
