@@ -105,7 +105,7 @@ What gyrase does:
 
 gyrase uses its own aligner, [synapton](crates/synapton). Even though gyrase is GPL-3.0, synapton is dual-licensed under MIT or Apache-2.0 (pick whichever you want), so you are free to use it in your own projects.
 
-On chr20 (2.5M read pairs, 12 threads, Ryzen 5 7600X), synapton is about 5 times faster than bwa-mem2, 3 times faster than minimap2 and slightly faster than strobealign, while using less memory than all three:
+On chr20 (2.5M read pairs, 12 threads), synapton is about 5 times faster than bwa-mem2, 3 times faster than minimap2 and slightly faster than strobealign, while using less memory than all three:
 
 | Aligner | Wall time | Peak RSS | GIAB agreement (10 bp) | Misplaced at MAPQ 20 or more |
 | --- | --- | --- | --- | --- |
@@ -133,9 +133,3 @@ cargo build --workspace --release --locked
 ```
 
 The build creates `target/release/gyrase` and `target/release/gyr` (with .exe on Windows).
-
-## License
-
-gyrase is licensed under [GPL-3.0-or-later](LICENSE).
-
-synapton and its supporting crates (gyrase-genome, gyrase-index, gyrase-io and gyrase-reads) are dual-licensed under MIT or Apache-2.0, at your option.
