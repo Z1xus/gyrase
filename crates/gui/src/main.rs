@@ -40,6 +40,7 @@ fn main() -> Result<(), slint::PlatformError> {
 		.select()?;
 	slint::set_xdg_app_id("gyrase")?;
 	let app = App::new()?;
+	app.set_version(concat!("v", env!("CARGO_PKG_VERSION")).into());
 	let session = Session::new(&app);
 	drops::accept(&app, &session);
 	session.connect(&app);

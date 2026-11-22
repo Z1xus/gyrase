@@ -6,6 +6,7 @@ import { Tile } from "sample-card.slint";
 export component PickView inherits VerticalLayout {
     in property <bool> dragging;
     in property <string> error;
+    in property <string> version;
     callback choose;
 
     spacing: Metrics.section;
@@ -45,6 +46,14 @@ export component PickView inherits VerticalLayout {
                 color: Gel.ink-muted;
                 horizontal-alignment: center;
             }
+        }
+
+        Text {
+            x: (parent.width - self.width) / 2;
+            y: parent.height - self.height - Metrics.pad;
+            text: root.version;
+            font-size: 11px;
+            color: Gel.ink-muted;
         }
     }
 

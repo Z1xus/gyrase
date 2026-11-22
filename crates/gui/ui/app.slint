@@ -23,6 +23,7 @@ export component App inherits Window {
     in property <string> percent;
     in property <string> eta;
     in property <[Written]> written;
+    in property <string> version;
     callback choose-file;
     callback remove-sample;
     callback toggle-format(int);
@@ -48,6 +49,7 @@ export component App inherits Window {
         if root.view == View.pick: PickView {
             dragging: root.dragging;
             error: root.error;
+            version: root.version;
             choose => {
                 root.choose-file();
             }
