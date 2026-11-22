@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 description = "Consumer DNA microarray panels and raw genotype file exporters"
 readme = "README.md"
+publish = false
 keywords = ["genomics", "bioinformatics", "genotypes", "23andme", "ancestry"]
 categories = ["science::bioinformatics::genomics"]
 

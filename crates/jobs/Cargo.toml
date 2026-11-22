@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 description = "Whole-genome alignment, variant calling and export pipeline runner for gyrase"
 readme = "README.md"
+publish = false
 keywords = ["genomics", "bioinformatics", "pipeline", "vcf", "bam"]
 categories = ["science::bioinformatics::genomics"]
 

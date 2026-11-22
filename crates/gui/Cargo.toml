@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 description = "Desktop app to turn whole-genome DNA files into VCF and raw genotype files"
 readme = "README.md"
+publish = false
 keywords = ["genomics", "bioinformatics", "dna", "vcf", "gui"]
 categories = ["gui", "science::bioinformatics::genomics"]
 build = "build.rs"

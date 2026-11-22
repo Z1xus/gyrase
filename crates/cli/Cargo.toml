@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 description = "Command-line tool (gyr) to turn DNA files into VCF and raw genotype files"
 readme = "README.md"
+publish = false
 keywords = ["genomics", "bioinformatics", "cli", "samtools", "bcftools"]
 categories = ["command-line-utilities", "science::bioinformatics::genomics"]
 
